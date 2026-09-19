@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+/build/
+/dist/
+/test-results/
+*.log
+*.obj
+*.exe
+*.pdb
+*.ilk
+.env
+credentials*
+/memory.md
+/private/
