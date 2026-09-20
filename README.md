@@ -1,9 +1,9 @@
 # Angel Legacy Voice Bridge
 
-Version 0.1.0 **beta** — an offline bridge from current Windows NVDA to licensed
+Version 0.1.1 **beta** — an offline bridge from current Windows NVDA to licensed
 SAPI 5 voices installed in a 32-bit Windows XP virtual machine.
 
-[Download the beta](https://github.com/AngelsClan/angel-legacy-voice-bridge/releases/tag/v0.1.0)
+[Download the beta](https://github.com/AngelsClan/angel-legacy-voice-bridge/releases/tag/v0.1.1)
 · [Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
 
 This project was made with the help of AI.
@@ -57,9 +57,9 @@ not a tested/supported platform; contributors are welcome to qualify it.
 The build produces:
 
 1. `dist/XP Bridge/AngelLegacyVoiceBridge.exe` — copy this into XP.
-2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.0.nvda-addon` — install on the
+2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.1.nvda-addon` — install on the
    modern Windows computer, **not** inside XP.
-3. `dist/AngelLegacyVoiceBridge-0.1.0-source.zip` — readable Python and native
+3. `dist/AngelLegacyVoiceBridge-0.1.1-source.zip` — readable Python and native
    helper C++ source, build script, tests and documentation. No VM or voices.
 
 GitHub Releases provides the `.nvda-addon`, the standalone XP `.exe`, and this
@@ -69,6 +69,16 @@ automatic source-code archive. You do not need Python or a compiler to use them.
 Nothing is installed automatically by the build. Guest Additions/VMware Tools
 can help copy the helper, but the speech connection does not depend on them.
 An ISO attached to the VM is another offline way to transfer the helper.
+
+### Updating from 0.1.0
+
+Install the 0.1.1 add-on over the existing add-on and restart NVDA when ready.
+Saved settings are retained. The XP helper and protocol are unchanged: leave
+your existing 0.1.0 helper running; no XP restart or helper replacement is needed.
+This update recovers missing speech bookmarks after confirmed completion and
+keeps long-packet preparation outside the lock used by NVDA's speech controls.
+It also adds text-free progress diagnostics. These fixes address reproduced
+queue failure cases, not a claim that every possible host/VM freeze is resolved.
 
 ### VirtualBox configuration
 

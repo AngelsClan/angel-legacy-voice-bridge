@@ -67,6 +67,104 @@ def wait_until(condition, seconds=2):
 
 
 class ClientTests(unittest.TestCase):
+    def test_backlog_survives_lost_final_bookmarks(self):
+        original = self.pipe.read
+        def lose_periodic_bookmarks():
+            reply = original()
+            if reply.startswith(b"INDEX") and int(reply.split(b"\t")[-1]) % 3 == 0:
+                return b""
+            return reply
+        self.pipe.read = lose_periodic_bookmarks
+        for index in range(60):
+            self.client.enqueue([Speech("Synthetic event"), Bookmark(index)])
+        wait_until(lambda: any(event == "done" for event, data in self.events), 5)
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], list(range(60)))
+        self.assertEqual(self.client._recovered_indexes, 20)
+
+    def test_cancel_does_not_recover_indexes_from_old_done(self):
+        self.pipe.auto_done = False
+        self.client.enqueue([Speech("Canceled"), Bookmark(88)])
+        wait_until(lambda: any(f[0] == "COMMIT" for f in self.pipe.sent))
+        old = self.client._active
+        self.client.cancel()
+        self.client._process_line(["DONE", self.client._session, str(old[0]), str(old[1])])
+        self.assertFalse(any(event == "index" for event, data in self.events))
+        self.assertFalse(self.client._pending_indexes)
+
+    def test_duplicate_and_unknown_indexes_are_not_forwarded(self):
+        self.pipe.auto_done = False
+        self.client.enqueue([Speech("Test"), Bookmark(88)])
+        wait_until(lambda: any(f[0] == "COMMIT" for f in self.pipe.sent))
+        active = self.client._active
+        prefix = ["INDEX", self.client._session, str(active[0]), str(active[1])]
+        for index in (99, 88, 88):
+            self.client._process_line(prefix + [str(index)])
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], [88])
+
+    def test_pause_resume_during_packet_preparation_preserves_work(self):
+        entered, release = threading.Event(), threading.Event()
+        from _alvb.protocol import utterance_frames
+        def slow_frames(*args):
+            entered.set()
+            release.wait(2)
+            return utterance_frames(*args)
+        with patch("_alvb.client.utterance_frames", slow_frames):
+            self.client.enqueue([Speech("Test"), Bookmark(17)])
+            self.assertTrue(entered.wait(1))
+            try:
+                self.client.pause(True)
+                self.client.pause(False)
+            finally:
+                release.set()
+            wait_until(lambda: any(event == "done" for event, data in self.events))
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], [17])
+
+    def test_done_recovers_missing_bookmarks_before_reporting_completion(self):
+        original = self.pipe.read
+        def lose_bookmark():
+            reply = original()
+            return b"" if reply.startswith(b"INDEX") else reply
+        self.pipe.read = lose_bookmark
+        self.client.enqueue([Speech("First"), Bookmark(31), Speech("Second"), Bookmark(32)])
+        wait_until(lambda: any(event == "done" for event, data in self.events))
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], [31, 32])
+        self.assertEqual(self.events[-1][0], "done")
+
+    def test_later_bookmark_consumes_earlier_indexes_without_duplicate_completion(self):
+        original = self.pipe.read
+        def lose_first_bookmark():
+            reply = original()
+            return b"" if reply.startswith(b"INDEX") and reply.endswith(b"\t31\n") else reply
+        self.pipe.read = lose_first_bookmark
+        self.client.enqueue([Speech("First"), Bookmark(31), Speech("Second"), Bookmark(32)])
+        wait_until(lambda: any(event == "done" for event, data in self.events))
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], [32])
+
+    def test_preparing_large_utterance_does_not_block_cancel_or_enqueue(self):
+        entered, release = threading.Event(), threading.Event()
+        from _alvb.protocol import utterance_frames
+        def slow_frames(*args):
+            entered.set()
+            release.wait(2)
+            return utterance_frames(*args)
+        with patch("_alvb.client.utterance_frames", slow_frames):
+            self.client.enqueue([Speech("Large preparation"), Bookmark(91)])
+            self.assertTrue(entered.wait(1))
+            finished = threading.Event()
+            def cancel_and_enqueue():
+                self.client.cancel()
+                self.client.enqueue([Speech("New request"), Bookmark(92)])
+                finished.set()
+            caller = threading.Thread(target=cancel_and_enqueue)
+            caller.start()
+            try:
+                self.assertTrue(finished.wait(.2), "NVDA caller blocked by packet preparation")
+            finally:
+                release.set()
+                caller.join(2)
+        wait_until(lambda: any(event == "done" for event, data in self.events))
+        self.assertEqual([data[1] for event, data in self.events if event == "index"], [92])
+
     def test_scan_timeout_with_live_link_retains_connection_and_stops_scans(self):
         with patch("_alvb.client.VOICE_REFRESH_TIMEOUT", .04):
             self.client._process_line(["CAPS", self.client._session, "voice-refresh"])

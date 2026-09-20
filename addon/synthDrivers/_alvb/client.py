@@ -5,7 +5,7 @@ import time
 import uuid
 import logging
 
-from .protocol import LineReader, Speech, utterance_frames
+from .protocol import Bookmark, LineReader, Speech, utterance_frames
 
 DEFAULT_PIPE = r"\\.\pipe\AngelLegacySpeech-XP"
 ACK_TIMEOUT = 4
@@ -26,6 +26,10 @@ class BridgeClient:
         self._mixer_supported = False
         self._mixer_pending = False
         self._frames = deque()
+        self._pending_indexes = deque()
+        self._completed_utterances = 0
+        self._recovered_indexes = 0
+        self._last_diagnostic = 0
         self._waiting_ack = False
         self._ack_started = 0
         self._active_limit = 120
@@ -125,6 +129,7 @@ class BridgeClient:
             self._queue.clear()
             self._active = None
             self._frames.clear()
+            self._pending_indexes.clear()
             self._waiting_ack = False
             self._pending_done = False
             self._paused = False
@@ -160,12 +165,18 @@ class BridgeClient:
             self._commands.clear()
             self._active = None
             self._frames.clear()
+            self._pending_indexes.clear()
             self._waiting_ack = False
             self._pending_done = False
             self._paused = False
             self._pause_started = 0
             self.generation += 1
         if was_connected:
+            logger = logging.getLogger(__name__)
+            if self._stop.is_set():
+                logger.info("Bridge stopped")
+            else:
+                logger.warning("Bridge disconnected: %s", reason)
             self._notify("disconnected", reason)
 
     def _process_line(self, fields):
@@ -213,19 +224,36 @@ class BridgeClient:
         elif command == "PONG" and fields == ["PONG", self._session]:
             self._notify("health", None)
         elif command == "DONE" and len(fields) == 4 and fields[1] == self._session:
+            recovered = []
             with self._lock:
                 if self._active and (int(fields[2]), int(fields[3])) == self._active[:2]:
+                    # Some SAPI engines omit bookmarks, especially around empty
+                    # text. NVDA advances its queue on indexes, not DONE alone.
+                    # Actual completion is the only safe point to recover them.
+                    recovered = list(self._pending_indexes)
+                    self._pending_indexes.clear()
+                    self._recovered_indexes += len(recovered)
+                    self._completed_utterances += 1
                     self._active = None
                     self._waiting_ack = False
+            for index in recovered:
+                self._notify("index", (int(fields[2]), index))
         elif command == "ACK" and len(fields) == 4 and fields[1] == self._session:
             with self._lock:
                 if self._active and (int(fields[2]), int(fields[3])) == self._active[:2]:
                     self._waiting_ack = False
         elif command == "INDEX" and len(fields) == 5 and fields[1] == self._session:
+            index = int(fields[4])
             with self._lock:
                 valid = self._active and (int(fields[2]), int(fields[3])) == self._active[:2]
+                valid = valid and index in self._pending_indexes
+                if valid:
+                    # NVDA treats a later index as reaching earlier indexes too.
+                    # Do not replay them out of order when DONE arrives.
+                    while self._pending_indexes.popleft() != index:
+                        pass
             if valid:
-                self._notify("index", (int(fields[2]), int(fields[4])))
+                self._notify("index", (int(fields[2]), index))
         elif command == "FORMAT" and len(fields) == 5 and fields[1] == self._session:
             rate, bits, channels = map(int, fields[2:])
             self.output_format = f"{rate} Hz, {bits}-bit, {channels} channel(s)"
@@ -238,7 +266,40 @@ class BridgeClient:
             return
         self._last_receive = time.monotonic()
 
+    def _prepare_utterance(self):
+        """Reserve under the lock, prepare outside it, discard if canceled."""
+        unavailable = False
+        with self._lock:
+            if (not self.connected or self._paused or self._refresh_pending
+                    or self._active or not self._queue):
+                return
+            items = self._queue.popleft()
+            generation = self.generation
+            if any(isinstance(item, Speech) and item.voice not in self._catalog for item in items):
+                self._queue.clear()
+                self._pending_done = False
+                unavailable = True
+            else:
+                self._request_id += 1
+                active = (generation, self._request_id, time.monotonic())
+                self._active = active
+                session, quality = self._session, self.quality
+        if unavailable:
+            self._notify("voiceUnavailable", generation)
+            return
+        # Encoding/splitting long speech can take time on a busy host. Never
+        # make NVDA's enqueue, cancel or pause wait for packet construction.
+        frames = deque(utterance_frames(session, generation, active[1], items, quality))
+        indexes = deque(item.index for item in items if isinstance(item, Bookmark))
+        limit = 120 + sum(len(item.text) * .5 for item in items if isinstance(item, Speech))
+        with self._lock:
+            if self._active and self._active[:2] == active[:2] and not self._stop.is_set():
+                self._frames = frames
+                self._pending_indexes = indexes
+                self._active_limit = limit
+
     def _send_work(self, transport):
+        self._prepare_utterance()
         frames = []
         notifications = []
         with self._lock:
@@ -256,17 +317,6 @@ class BridgeClient:
                 self._refresh_pending = True
                 self._last_refresh = time.monotonic()
             if self.connected and not self._paused and not self._refresh_pending:
-                if not self._active and self._queue:
-                    items = self._queue.popleft()
-                    if any(isinstance(item, Speech) and item.voice not in self._catalog for item in items):
-                        self._queue.clear()
-                        self._pending_done = False
-                        notifications.append(("voiceUnavailable", self.generation))
-                    else:
-                        self._request_id += 1
-                        self._active = (self.generation, self._request_id, time.monotonic())
-                        self._active_limit = 120 + sum(len(item.text) * .5 for item in items if isinstance(item, Speech))
-                        self._frames = deque(utterance_frames(self._session, self.generation, self._request_id, items, self.quality))
                 if self._active and self._frames and not self._waiting_ack:
                     frames.append(self._frames.popleft())
                     self._waiting_ack = True
@@ -280,6 +330,22 @@ class BridgeClient:
             transport.write(frame)
         for event, data in notifications:
             self._notify(event, data)
+
+    def _log_progress(self, now):
+        if now - self._last_diagnostic < 10:
+            return
+        self._last_diagnostic = now
+        with self._lock:
+            queued, frames = len(self._queue), len(self._frames)
+            active_seconds = now - self._active[2] if self._active else 0
+            pending_indexes = len(self._pending_indexes)
+            paused, waiting_ack = self._paused, self._waiting_ack
+        # Counts and elapsed times only; never speech, voice tokens or paths.
+        logging.getLogger(__name__).info(
+            "Bridge progress: queued=%d frames=%d active_seconds=%.2f paused=%s "
+            "waiting_ack=%s pending_indexes=%d completed=%d recovered_indexes=%d reply_age=%.2f",
+            queued, frames, active_seconds, paused, waiting_ack, pending_indexes,
+            self._completed_utterances, self._recovered_indexes, now - self._last_receive)
 
     def _session_loop(self, transport):
         with self._lock:
@@ -320,6 +386,7 @@ class BridgeClient:
                 if self._active and not self._paused and now - self._active[2] > self._active_limit:
                     raise TimeoutError("XP speech did not finish")
             self._send_work(transport)
+            self._log_progress(time.monotonic())
         transport.write(f"CANCEL\t{self._session}\t{self.generation + 1}\n".encode("ascii"))
 
     def _run(self):

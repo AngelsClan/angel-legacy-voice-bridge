@@ -5,7 +5,7 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 def check_archive(path):

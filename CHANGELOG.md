@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 beta — 2026-09-20
+
+- Recover missing trailing bookmarks only after the current utterance reports
+  completion. NVDA can then advance its queued speech instead of waiting forever.
+- Ignore duplicate/unknown bookmarks and discard canceled-generation completions.
+- Prepare speech packets outside the state lock so cancel, pause and enqueue do
+  not wait for a busy worker's text encoding. Canceled prepared work is discarded.
+- Add text-free progress counters/timings and disconnect reasons to the NVDA log.
+- Add queue/fault-injection regressions and an opt-in muted real-XP burst probe.
+- Add-on-only update: existing 0.1.0 XP helper remains compatible and unchanged.
+
 ## 0.1.0 beta — 2026-09-19
 
 First public beta preparation: state-aware Connect/Cancel connection/Disconnect

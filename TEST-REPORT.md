@@ -1,4 +1,39 @@
-# Beta qualification — 2026-09-19
+# Beta qualification
+
+## 0.1.1 queue fixes — 2026-09-20
+
+- 91 unit/contract tests pass. Before the fix, regressions for missing bookmarks
+  and deliberately slow packet preparation failed. Both now pass, along with
+  60-request backlog recovery, cancellation, duplicate/stale indexes, and
+  pause/resume while packet preparation is in progress.
+- The hidden real-wx settings/control smoke passed again; no window was shown
+  and no active NVDA configuration was loaded or changed by that test.
+- Live offline XP/headless baseline: two 40-request muted queues completed at
+  default and 48 kHz. The original full-computer freeze was not reproduced.
+- Updated client: two 60-request muted queues completed with all 120 bookmarks
+  in order. Maximum consecutive bookmark gap was 0.594 seconds (default) and
+  0.563 seconds (48 kHz). These include synthetic speech duration and are not
+  measurements of input latency. Probe used 0.98 host-process CPU seconds over
+  68.48 wall seconds; this does not measure the VM's CPU use.
+- Actual XP tests also passed all three installed voices at all five output
+  formats, long-utterance assembly, cancellation and worker/pipe release.
+- A second 120-request real-XP run deliberately filtered out every third INDEX
+  reply: all 120 completions remained ordered and 40 indexes were recovered.
+  Repeated cancellation's maximum caller wait was 0.0001 seconds in that probe.
+  Bookmark-only and empty-text utterances passed. Each probe released the pipe.
+- Local application logs confirmed a dense event stream overlapping NVDA
+  watchdog freezes. They did not capture the blocked stack. No production
+  server connection, active NVDA replacement, XP reboot or settings change was
+  used to investigate. Private logs are not included in the release.
+- Existing XP helper and wire protocol are unchanged. Install only the new
+  add-on, then restart NVDA when ready. Listening under the original workload
+  remains necessary; do not claim the entire reported freeze is proven fixed.
+
+The completion recovery follows the same principle as NVDA's SAPI5 driver's
+end-of-stream bookmark handling, implemented here for session/generation-scoped
+bridge requests. Reference: https://github.com/nvaccess/nvda/blob/master/source/synthDrivers/sapi5.py
+
+## Previous 0.1.0 qualification — 2026-09-19
 
 Angel Legacy Voice Bridge **0.1.0 beta** is suitable for controlled user testing,
 not advertised as a universally qualified primary screen reader. Keep local
@@ -18,7 +53,7 @@ speech available. All test speech used synthetic phrases, never personal text.
 
 ## Verified checks
 
-The current automated suite contains 84 passing unit/contract tests, including
+The initial automated suite contained 84 passing unit/contract tests, including
 the isolated Windows event round trip. Four measured unchanged-catalog idle
 scans on the three-voice XP guest took approximately 13–34 milliseconds each
 (host polling resolution applies). These are scan round trips, not end-to-end

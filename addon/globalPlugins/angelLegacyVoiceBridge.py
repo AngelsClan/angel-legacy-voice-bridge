@@ -218,7 +218,7 @@ class BridgePanel(SettingsPanel):
         self.onRefresh(None)
 
     def onAbout(self, event):
-        gui.messageBox("Angel Legacy Voice Bridge 0.1.0 beta\nAngels Clan\n\nUse installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Includes live voice discovery, optional eSpeak recovery/return, mirroring, speech controls and output formats. Disconnect stops bridge speech and retries. No voices, network listener or Windows service are included. GPL version 2 or later. See add-on help for setup, privacy, maintenance controls and tested limitations.", "About Angel Legacy Voice Bridge")
+        gui.messageBox("Angel Legacy Voice Bridge 0.1.1 beta\nAngels Clan\n\nUse installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Includes live voice discovery, optional eSpeak recovery/return, mirroring, speech controls and output formats. Disconnect stops bridge speech and retries. No voices, network listener or Windows service are included. GPL version 2 or later. See add-on help for setup, privacy, maintenance controls and tested limitations.", "About Angel Legacy Voice Bridge")
 
     def isValid(self):
         name = self.pipe.GetValue().strip()

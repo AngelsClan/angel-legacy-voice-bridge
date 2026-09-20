@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Angel Legacy Voice Bridge help</title></head>
 <body>
-<h1>Angel Legacy Voice Bridge 0.1.0 beta</h1>
+<h1>Angel Legacy Voice Bridge 0.1.1 beta</h1>
 <p>Angels Clan. Use licensed SAPI 5 voices installed in an offline, 32-bit Windows XP virtual machine with modern Windows NVDA. XP speaks through its own virtual sound card. Neither internet access nor NVDA inside XP is required. Voice engines are not included.</p>
 <h2>Safety first</h2>
 <p>Keep a working local voice until you have tested this beta. <strong>NVDA+Shift+F11</strong> disables speech, mirroring, retries and automatic startup. It keeps your current local synthesizer, or switches to eSpeak if the bridge was selected. You can reassign that shortcut under Input Gestures. NVDA+Control+S opens normal synthesizer selection.</p>
@@ -9,7 +9,7 @@
 <h2>Two parts to install</h2>
 <ol>
 <li>Copy the release's XP Bridge folder to XP. The console program is AngelLegacyVoiceBridge.exe; double-click it after configuring the virtual serial port below. Leave it open and Alt+Tab away. Control+C exits.</li>
-<li>Open AngelLegacyVoiceBridge-0.1.0.nvda-addon on the modern Windows host. Approve installation, then restart NVDA when ready. Do not install the add-on in XP.</li>
+<li>Open AngelLegacyVoiceBridge-0.1.1.nvda-addon on the modern Windows host. Approve installation, then restart NVDA when ready. Do not install the add-on in XP. Upgrading from 0.1.0 retains settings and does not require replacing the XP helper or restarting XP.</li>
 </ol>
 <h2>VirtualBox setup</h2>
 <p>Shut XP down normally before editing virtual hardware. In VirtualBox Settings, Serial Ports, enable port 1: COM1, I/O 0x3F8, IRQ 4, Host Pipe. Set the path to <code>\\.\pipe\AngelLegacySpeech-XP</code>. Leave “Connect to existing pipe” unchecked: VirtualBox creates the pipe. Keep XP network adapters disabled. Start XP with its visible window.</p>
@@ -68,6 +68,7 @@
 <p>No voices: check the running XP helper, COM number, exact pipe path and whether another test/client owns it. Connected but silent: test XP's normal sound and Speech control panel, then its output and mixer settings. Try a different installed voice. A transport test cannot prove speakers are audible.</p>
 <p>For a stuck engine restore local speech, close/reopen the helper, and reconnect. View lifecycle/errors in the XP console and NVDA Tools, View log. Do not enable XP networking as a workaround. Never run developer integration tests while relying on the bridge as your only speech.</p>
 <h2>Removal</h2>
+<p>Version 0.1.1 recovers missing speech bookmarks after confirmed completion and keeps packet preparation from blocking speech controls. Its log progress entries contain counts and timings only, never spoken text. If pauses recur, note the time and review the NVDA log; these fixes do not guarantee that every possible host or VM stall is resolved.</p>
 <p>Select local speech, disable mirroring/automatic connect, remove the add-on and restart NVDA when convenient. Close the XP helper with Control+C. Its folder can then be removed. Optionally disable the virtual serial port while the VM is powered off. Do not delete your VM or voice installations.</p>
 <h2>License and source</h2>
 <p>Copyright 2026 Angels Clan. Original project code is GPL version 2 or later; see LICENSE.txt. Other programs and voices retain their own licenses. README, OPERATIONS, PROTOCOL and TEST-REPORT explain setup, maintenance, building and limitations. Python source is in the add-on; the separate source ZIP includes the native helper's C++ source and build script. VirtualBox is the only currently supported hypervisor; contributions to qualify VMware are welcome.</p>

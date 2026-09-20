@@ -141,6 +141,19 @@ actual host. The helper still needs a logged-in audio session.
 
 ## Diagnostics and reporting
 
+For a muted backlog test with the bridge disconnected, run
+`python tools/burst_probe.py --pipe PIPE --count 60`. The optional
+`--drop-index-every 3` deliberately omits some received bookmark notifications
+to verify recovery after real XP speech completion. It does not delete speech,
+connect to TeamTalk, change guest settings or access private chat text.
+
+Version 0.1.1 reports progress counts/times about every ten seconds in the NVDA
+log: queued requests, unsent frames, active duration, pause/acknowledgement
+state, pending indexes, completed requests, recovered indexes and reply age.
+Speech text, voice tokens and pipe paths are excluded. Disconnect reasons are
+also logged. If a freeze recurs, record its time and compare these entries to
+NVDA's watchdog messages; a watchdog report alone does not identify its cause.
+
 Report NVDA/VirtualBox/XP versions, 32-bit SAPI5 engine name, connection status,
 selected format, and reproducible steps. Do not upload proprietary engine files
 or personal speech. The helper console and NVDA log contain lifecycle/error
