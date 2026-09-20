@@ -147,12 +147,21 @@ For a muted backlog test with the bridge disconnected, run
 to verify recovery after real XP speech completion. It does not delete speech,
 connect to TeamTalk, change guest settings or access private chat text.
 
-Version 0.1.1 reports progress counts/times about every ten seconds in the NVDA
-log: queued requests, unsent frames, active duration, pause/acknowledgement
-state, pending indexes, completed requests, recovered indexes and reply age.
-Speech text, voice tokens and pipe paths are excluded. Disconnect reasons are
-also logged. If a freeze recurs, record its time and compare these entries to
-NVDA's watchdog messages; a watchdog report alone does not identify its cause.
+Release is on hold after an unresolved loss-of-speech incident. Do not ask a
+speech-dependent user to reproduce a freeze. Inspect already available logs and
+use an isolated, muted NVDA configuration for developer fault injection.
+
+The development build writes `angelLegacyVoiceBridge-diagnostics.log` in NVDA's
+configuration directory, independent of its normal log filter. Version 0.1.1
+attempted to log progress at INFO level through a third-party Python logger;
+NVDA normally filters those records, so their absence is not evidence of idle
+speech. The new file records numeric queue/progress counters, stalled main-thread
+code locations, recovery timing and lifecycle errors. It remains active with
+local speech and the bridge off. No speech text, window titles, frame locals,
+full source paths or credentials are recorded. Three files total about 3 MiB;
+slow disk drops records instead of blocking speech. No automatic upload occurs.
+See README for limits: this does not guarantee evidence or recovery from every
+native hang. An installed update only takes effect after a safe NVDA restart.
 
 Report NVDA/VirtualBox/XP versions, 32-bit SAPI5 engine name, connection status,
 selected format, and reproducible steps. Do not upload proprietary engine files

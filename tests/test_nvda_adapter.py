@@ -55,6 +55,16 @@ def module(name, **attributes):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_failed_diagnostics_and_startup_preserve_plugin_controls(self):
+        self.service.start_diagnostics.side_effect = RuntimeError("No thread resources")
+        self.service.ensure_client.side_effect = RuntimeError("No transport resources")
+        plugin = self.plugin.GlobalPlugin()
+        self.assertTrue(plugin.registered)
+        self.assertIn(self.plugin.BridgePanel, self.plugin.NVDASettingsDialog.categoryClasses)
+        plugin.pollControl()  # Missing maintenance control is safe too.
+        plugin.terminate()
+        self.assertNotIn(self.plugin.BridgePanel, self.plugin.NVDASettingsDialog.categoryClasses)
+
     def test_disabling_mirror_cancels_immediately(self):
         panel = self.panel()
         panel.onMirror(None)
@@ -91,6 +101,7 @@ class AdapterTests(unittest.TestCase):
         self.client.voice_snapshot.return_value = ({0: "Test Mike"}, {0: "token"})
         self.service = module("service", settings=lambda: self.settings, client=self.client,
                               ensure_client=Mock(return_value=self.client), stop=Mock(),
+                              start_diagnostics=Mock(), stop_diagnostics=Mock(),
                               listeners=[], testing=False, disable=Mock(), finish_test=Mock(), arm_recovery=Mock(), clear_recovery=Mock())
         self.handler = module("synthDriverHandler", SynthDriver=Base,
                               getSynth=Mock(return_value=types.SimpleNamespace(name="espeak")),
@@ -119,6 +130,7 @@ class AdapterTests(unittest.TestCase):
             "speech": module("speech", extensions=speech_extensions),
             "synthDriverHandler": self.handler, "ui": module("ui", message=Mock()),
             "wx": self.wx, "logHandler": module("logHandler", log=Mock()),
+            "queueHandler": module("queueHandler", eventQueue=object(), queueFunction=lambda queue, fn, *args: fn(*args)),
             "synthDrivers": package, "synthDrivers._alvb": shared,
             "synthDrivers._alvb.service": self.service,
             "synthDrivers._alvb.protocol": protocol,

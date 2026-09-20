@@ -1,4 +1,12 @@
-# Angel Legacy Voice Bridge 0.1.1 beta
+# Angel Legacy Voice Bridge — release hold
+
+0.1.2-dev1 is a diagnostic development candidate, not a cleared release.
+An accessibility-critical NVDA freeze reported against 0.1.1 remains unresolved.
+Keep local speech selected and bridge operation disabled. See TEST-REPORT.md
+for verified fixes, isolated tests and their limits. No user reproduction is
+required or requested. New logs are bounded and exclude spoken content.
+
+## Historical 0.1.1 beta notes (superseded by the hold above)
 
 ## Queue responsiveness fix
 

@@ -218,7 +218,7 @@ class BridgePanel(SettingsPanel):
         self.onRefresh(None)
 
     def onAbout(self, event):
-        gui.messageBox("Angel Legacy Voice Bridge 0.1.1 beta\nAngels Clan\n\nUse installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Includes live voice discovery, optional eSpeak recovery/return, mirroring, speech controls and output formats. Disconnect stops bridge speech and retries. No voices, network listener or Windows service are included. GPL version 2 or later. See add-on help for setup, privacy, maintenance controls and tested limitations.", "About Angel Legacy Voice Bridge")
+        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev1\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
 
     def isValid(self):
         name = self.pipe.GetValue().strip()
@@ -276,20 +276,32 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         synthDriverHandler.synthChanged.register(service.clear_recovery)
         self.registered = True
         try:
+            service.start_diagnostics()
+        except Exception as error:
+            log.warning("Legacy Voice Bridge monitor unavailable: %s", type(error).__name__)
+        try:
             from synthDrivers._alvb.control import DisableControl
             self.control = DisableControl()
             self.controlTimer = wx.PyTimer(self.pollControl)
             self.controlTimer.Start(250)
         except Exception:
+            if self.controlTimer:
+                self.controlTimer.Stop()
             if self.control:
                 self.control.close()
                 self.control = None
             log.exception("Legacy Voice Bridge maintenance control unavailable")
         if values["active"] and (values["enabled"] or values["mirror"]):
-            service.ensure_client()
+            try:
+                service.ensure_client()
+            except Exception as error:
+                # Keep settings and the emergency controls registered even if
+                # creating the transport worker fails under resource pressure.
+                log.warning("Legacy Voice Bridge startup connection unavailable: %s", type(error).__name__)
 
     def pollControl(self):
-        self.control.poll(service.disable, service.is_stopped)
+        if self.control:
+            self.control.poll(service.disable, service.is_stopped)
 
     def mirroring(self):
         active = synthDriverHandler.getSynth()
@@ -330,6 +342,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ui.message("Bridge disabled. Local speech only.")
 
     def terminate(self):
+        service.stop_diagnostics()
         if getattr(self, "controlTimer", None):
             self.controlTimer.Stop()
         if getattr(self, "control", None):

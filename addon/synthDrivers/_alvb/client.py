@@ -14,7 +14,10 @@ VOICE_REFRESH_TIMEOUT = 4
 
 
 class BridgeClient:
-    def __init__(self, pipe_name=DEFAULT_PIPE, callback=None, transport_factory=None, wait_for=None, quality=0):
+    def __init__(self, pipe_name=DEFAULT_PIPE, callback=None, transport_factory=None, wait_for=None, quality=0, logger=None):
+        # NVDA filters INFO from third-party loggers. Its adapter supplies the
+        # NVDA logger; standalone probes retain normal Python logging.
+        self.log = logger if logger is not None else logging.getLogger(__name__)
         if transport_factory is None:
             from .pipe import Pipe
             transport_factory = Pipe
@@ -28,6 +31,8 @@ class BridgeClient:
         self._frames = deque()
         self._pending_indexes = deque()
         self._completed_utterances = 0
+        self._enqueued_utterances = 0
+        self._cancellations = 0
         self._recovered_indexes = 0
         self._last_diagnostic = 0
         self._waiting_ack = False
@@ -100,9 +105,9 @@ class BridgeClient:
     def _notify(self, event, data):
         try:
             self.callback(event, data)
-        except Exception:
+        except Exception as error:
             # A torn-down UI must not kill the transport worker. No payload log.
-            logging.getLogger(__name__).warning("Bridge callback unavailable")
+            self.log.warning("Bridge callback unavailable: event=%s error_type=%s", event, type(error).__name__)
 
     def enqueue(self, items):
         items = tuple(items)
@@ -115,6 +120,7 @@ class BridgeClient:
             if len(self._queue) >= 64:
                 raise ValueError("Speech queue limit exceeded")
             self._queue.append(items)
+            self._enqueued_utterances += 1
             self._pending_done = True
         return True
 
@@ -125,6 +131,7 @@ class BridgeClient:
 
     def cancel(self):
         with self._lock:
+            self._cancellations += 1
             self.generation = (self.generation + 1) % 2147483647
             self._queue.clear()
             self._active = None
@@ -172,7 +179,7 @@ class BridgeClient:
             self._pause_started = 0
             self.generation += 1
         if was_connected:
-            logger = logging.getLogger(__name__)
+            logger = self.log
             if self._stop.is_set():
                 logger.info("Bridge stopped")
             else:
@@ -210,7 +217,7 @@ class BridgeClient:
             self._refresh_pending = False
             self._last_refresh = time.monotonic() + (25 if command == "VOICESRETRY" else 0)
             if command == "VOICESRETRY":
-                logging.getLogger(__name__).warning("XP voice scan incomplete; retaining last good catalog")
+                self.log.warning("XP voice scan incomplete; retaining last good catalog")
         elif fields == ["CAPS", self._session, "xp-volume"]:
             self._mixer_supported = True
             if self.mixer_status == "Helper support not reported":
@@ -220,7 +227,7 @@ class BridgeClient:
             self.mixer_status = {"OK": "Master and Wave at 100%", "PARTIAL": "Only some playback controls adjusted",
                                  "UNSUPPORTED": "Playback mixer could not be adjusted"}.get(fields[2], "Unknown result")
             if fields[2] != "OK":
-                logging.getLogger(__name__).warning("XP playback mixer adjustment incomplete")
+                self.log.warning("XP playback mixer adjustment incomplete")
         elif command == "PONG" and fields == ["PONG", self._session]:
             self._notify("health", None)
         elif command == "DONE" and len(fields) == 4 and fields[1] == self._session:
@@ -340,12 +347,14 @@ class BridgeClient:
             active_seconds = now - self._active[2] if self._active else 0
             pending_indexes = len(self._pending_indexes)
             paused, waiting_ack = self._paused, self._waiting_ack
+            enqueued, cancellations = self._enqueued_utterances, self._cancellations
         # Counts and elapsed times only; never speech, voice tokens or paths.
-        logging.getLogger(__name__).info(
+        self.log.info(
             "Bridge progress: queued=%d frames=%d active_seconds=%.2f paused=%s "
-            "waiting_ack=%s pending_indexes=%d completed=%d recovered_indexes=%d reply_age=%.2f",
+            "waiting_ack=%s pending_indexes=%d completed=%d recovered_indexes=%d reply_age=%.2f "
+            "enqueued=%d cancellations=%d",
             queued, frames, active_seconds, paused, waiting_ack, pending_indexes,
-            self._completed_utterances, self._recovered_indexes, now - self._last_receive)
+            self._completed_utterances, self._recovered_indexes, now - self._last_receive, enqueued, cancellations)
 
     def _session_loop(self, transport):
         with self._lock:
@@ -372,6 +381,7 @@ class BridgeClient:
                 self._process_line(fields)
             if now - self._last_receive > 4:
                 raise TimeoutError("No reply from XP helper")
+            refresh_timed_out = False
             with self._lock:
                 if self._refresh_pending and now - self._last_refresh > VOICE_REFRESH_TIMEOUT:
                     # PONG may prove the link is healthy even if a catalog was
@@ -380,11 +390,15 @@ class BridgeClient:
                     self._refresh_supported = False
                     self._refresh_disabled = True
                     self._ready_seen = False
-                    logging.getLogger(__name__).warning("XP voice refresh timed out; retaining catalog and pausing scans")
+                    refresh_timed_out = True
                 if self._waiting_ack and now - self._ack_started > ACK_TIMEOUT:
                     raise TimeoutError("XP did not acknowledge a speech packet")
                 if self._active and not self._paused and now - self._active[2] > self._active_limit:
                     raise TimeoutError("XP speech did not finish")
+            if refresh_timed_out:
+                # Logging handlers can block on disk or acquire other locks.
+                # Do not make cancel/enqueue wait behind those handlers.
+                self.log.warning("XP voice refresh timed out; retaining catalog and pausing scans")
             self._send_work(transport)
             self._log_progress(time.monotonic())
         transport.write(f"CANCEL\t{self._session}\t{self.generation + 1}\n".encode("ascii"))
@@ -418,6 +432,6 @@ class BridgeClient:
                     try:
                         transport.close()
                     except OSError:
-                        logging.getLogger(__name__).warning("Bridge transport close failed")
+                        self.log.warning("Bridge transport close failed")
             self._stop.wait(1)
         self._disconnect("Stopped")

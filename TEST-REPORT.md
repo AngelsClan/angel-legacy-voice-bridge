@@ -1,5 +1,67 @@
 # Beta qualification
 
+## Emergency investigation — 2026-09-20, release HOLD
+
+The user reported loss of NVDA speech during window switching under heavy
+TeamTalk events, requiring forced restart. **Not reproduced and not proven
+fixed.** Do not ask a speech-dependent user to reproduce this incident.
+
+- Existing logs show startup callback failures before wx.App initialization;
+  this is corrected with NVDA's core event queue but is not established as the
+  cause of the later window-switching freeze.
+- 113 unit/contract tests pass, including bounded logging, rotation, slow/full
+  diagnostic queues, inaccessible paths, callback ownership, and stale delivery.
+  Added startup-failure isolation and transient-write recovery after review.
+- Real NVDA 2026.2 runs used a separate Windows desktop and isolated, muted
+  configuration. No foreground switch, real-user input, live server connection,
+  active NVDA restart or personal profile copy was used.
+- A 900-tick real-NVDA/XP run queued 60,000 synthetic speech requests in addition
+  to background controller events. NVDA's pending sequence count exceeded
+  113,000. It then processed 50 synthetic focus events and cancellation. The
+  longest 100-ms test-timer interval was 0.176 seconds; the test exited normally.
+  This is not an end-to-end speech-latency measurement or a real Chrome Alt-Tab
+  reproduction. Focus events were explicitly queued for hidden test controls.
+- The released 0.1.1 baseline also passed the same isolated 60,000-request/focus
+  scenario (longest timer interval 0.177 seconds). This is important negative
+  evidence: this harness does not distinguish or reproduce the reported bug,
+  and its passing result cannot validate a cure for the original incident.
+- The final candidate, after separating diagnostics from bridge lifetime, also
+  completed a 900-tick real-NVDA/XP run with 76 synthetic focus events, normal
+  exit and a longest timer interval of 0.120 seconds. Hidden real-wx settings
+  construction and state/control checks passed separately.
+- A deliberately injected six-second main-thread stall was detected after
+  three seconds, including the blocking test-function location and recovery.
+  The same detection passed using local eSpeak with the bridge disabled and
+  no XP connection. No speech text or window title was recorded.
+- TeamTalk's local session log contains over 53,000 status events across about
+  six and a half hours. Events continued near the reported NVDA restart. It
+  contains no fatal record establishing which process failed first. Force-close
+  may leave no final log; absence of a crash record is not proof of no crash.
+- Separate Qt source review found an indefinite screen-reader-worker shutdown
+  wait. A bounded-exit fix passes fake-backend tests for healthy shutdown, stuck
+  speech with 1,000 queued messages, and stuck backend cleanup. This could explain
+  why closing the client failed after speech was stuck, not the original trigger.
+- A second Qt risk was found: long-label formatting performed live screen-reader
+  feature probes on the GUI thread. Detection now runs on the worker and label
+  formatting reads a conservative cached result. Fault tests verify 100,000 UI
+  reads do not probe or wait even while detection is blocked. This is a plausible
+  contributing path, not proof it caused the user's incident.
+- Claudius performed a read-only review. Startup diagnostic failures can no
+  longer prevent safety-control registration; stopped monitors are generation
+  guarded, transient file locks are recoverable, and private NVDA counter API
+  changes are isolated. Synchronous disk flushing on NVDA's main thread was
+  deliberately rejected because it would introduce another blocking path.
+  A second review found missing detection when Prism speech was not selected
+  and excessive sampling of unavailable counters. Both are corrected and
+  regression-tested. The full Qt client also compiles with native Windows/Qt
+  tools and real Prism; compilation alone is not runtime acceptance.
+
+The XP helper is unchanged. Candidate diagnostics are not installed into the
+user's active NVDA and no new public binary release is approved by these tests.
+
+The sections below are historical qualification records, not current clearance
+to use the bridge as a primary synthesizer.
+
 ## 0.1.1 queue fixes — 2026-09-20
 
 - 91 unit/contract tests pass. Before the fix, regressions for missing bookmarks

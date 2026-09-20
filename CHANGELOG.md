@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2-dev1 — unreleased diagnostics, release on hold
+
+- Preserve the reported speech-loss incident as unresolved; passing isolated
+  tests does not establish that the original Alt-Tab freeze has been repaired.
+- Dispatch callbacks through NVDA's core event queue, including startup before
+  wx.App exists. Avoid unrelated wx callback reentrancy into speech handling.
+- Add bounded asynchronous, rotating, text-free diagnostics independent of the
+  bridge connection and of NVDA's filtering of external INFO-level log records.
+- Record delayed main-thread heartbeats and code locations without recording
+  speech, locals, window names or source paths. Add real isolated-NVDA stress
+  and fault-injection checks; keep the user's running screen reader untouched.
+
 ## 0.1.1 beta — 2026-09-20
 
 - Recover missing trailing bookmarks only after the current utterance reports

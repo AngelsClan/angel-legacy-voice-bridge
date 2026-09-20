@@ -24,7 +24,9 @@ class ServiceTests(unittest.TestCase):
         self.values = dict(active=True, enabled=True, mirror=True, autoReturn=True, fullXPVolume=False, pipe=DEFAULT_PIPE, quality=0)
         self.handler = types.SimpleNamespace(getSynth=Mock(return_value=types.SimpleNamespace(name="ibmeci")), setSynth=Mock(),
             changeVoice=lambda synth, voice: setattr(synth, "voice", voice))
-        modules = {"config": types.SimpleNamespace(), "wx": types.SimpleNamespace(CallAfter=lambda fn, *args: fn(*args)),
+        self.pending = []
+        modules = {"config": types.SimpleNamespace(),
+                   "queueHandler": types.SimpleNamespace(eventQueue=Mock(), queueFunction=lambda queue, fn, *args: self.pending.append((fn, args))),
                    "logHandler": types.SimpleNamespace(log=Mock()), "synthDriverHandler": self.handler}
         patcher = patch.dict(sys.modules, modules)
         patcher.start()
@@ -34,7 +36,83 @@ class ServiceTests(unittest.TestCase):
         self.service = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.service)
         self.service.settings = lambda: self.values
+        self.real_diagnostics = self.service.diagnostics
+        self.service.diagnostics = Mock(return_value=Mock())
         self.service.BridgeClient = Mock()
+
+    def test_diagnostic_construction_failure_uses_disabled_sink(self):
+        state = types.SimpleNamespace(WritePaths=types.SimpleNamespace(configDir="unused"))
+        with patch.dict(sys.modules, {"NVDAState": state}):
+            with patch.object(self.service, "DiagnosticLog", side_effect=RuntimeError("no threads")):
+                sink = self.real_diagnostics()
+                self.assertTrue(sink.failed)
+                sink.info("Test record")
+                self.assertIs(self.real_diagnostics(), sink)
+
+    def test_monitor_start_failure_can_be_retried(self):
+        with patch.object(self.service.MainThreadDispatch, "start_monitor", side_effect=RuntimeError("no threads")):
+            with self.assertRaises(RuntimeError):
+                self.service.start_diagnostics()
+        self.assertIsNone(self.service.monitor_stopped)
+
+    def test_diagnostics_does_not_connect_or_change_synth(self):
+        with patch.object(self.service.MainThreadDispatch, "start_monitor") as start:
+            self.service.start_diagnostics()
+            self.service.start_diagnostics()
+            start.assert_called_once()
+            stopped = start.call_args.args[0]
+            self.service.stop_diagnostics()
+            self.assertTrue(stopped.is_set())
+        self.service.BridgeClient.assert_not_called()
+        self.handler.setSynth.assert_not_called()
+
+    def test_diagnostic_tick_with_bridge_off_records_counts_only(self):
+        with patch.object(self.service, "speech_backlog_counts", return_value=(12, 2, 1)):
+            self.service._diagnostic_tick("health", None)
+        self.assertIsNone(self.service.client)
+        self.service.diagnostics.return_value.info.assert_called_once()
+        self.service.BridgeClient.assert_not_called()
+
+    def test_unknown_idle_backlog_does_not_churn_log(self):
+        with patch.object(self.service, "speech_backlog_counts", return_value=(-1, -1, -1)) as counts:
+            with patch.object(self.service.time, "monotonic") as clock:
+                for second in range(100, 160):
+                    clock.return_value = second
+                    self.service._diagnostic_tick("health", None)
+        self.assertEqual(counts.call_count, 12)
+        self.service.diagnostics.return_value.info.assert_called_once()
+
+    def test_retired_monitor_cannot_deliver_after_plugin_reload(self):
+        with patch.object(self.service.MainThreadDispatch, "start_monitor"):
+            with patch.object(self.service, "_diagnostic_tick") as tick:
+                with patch.object(self.service, "MainThreadDispatch", wraps=self.service.MainThreadDispatch) as factory:
+                    self.service.start_diagnostics()
+                    deliver = factory.call_args.args[1]
+                    self.service.stop_diagnostics()
+                    self.service.start_diagnostics()
+                    deliver("health", None)
+                    tick.assert_not_called()
+                    self.service.stop_diagnostics()
+
+    def test_startup_callback_waits_for_nvda_queue_without_wx(self):
+        source = self.service.ensure_client()
+        listener = Mock()
+        self.service.listeners.append(listener)
+        source.callback("connected", None)
+        listener.assert_not_called()
+        function, args = self.pending.pop()
+        function(*args)
+        listener.assert_called_once_with("connected", None)
+
+    def test_queued_callback_after_disable_cannot_restore_bridge(self):
+        source = self.service.ensure_client()
+        listener = Mock()
+        self.service.listeners.append(listener)
+        source.callback("connected", None)
+        self.service.stop()
+        function, args = self.pending.pop()
+        function(*args)
+        listener.assert_not_called()
 
     def arm(self):
         source = self.service.ensure_client()

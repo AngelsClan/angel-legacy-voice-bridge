@@ -67,6 +67,30 @@ def wait_until(condition, seconds=2):
 
 
 class ClientTests(unittest.TestCase):
+    def test_slow_refresh_warning_cannot_hold_speech_state_lock(self):
+        from unittest.mock import Mock
+        entered, release = threading.Event(), threading.Event()
+        def slow_warning(*args):
+            entered.set()
+            release.wait(2)
+        logger = Mock()
+        logger.warning.side_effect = slow_warning
+        self.client.log = logger
+        try:
+            with self.client._lock:
+                self.client._refresh_pending = True
+                self.client._last_refresh = time.monotonic() - 100
+            self.assertTrue(entered.wait(2))
+            acquired = self.client._lock.acquire(timeout=.1)
+            self.assertTrue(acquired, "logging must not hold the state lock")
+            if acquired:
+                self.client._lock.release()
+            started = time.monotonic()
+            self.client.cancel()
+            self.assertLess(time.monotonic() - started, .1)
+        finally:
+            release.set()
+
     def test_backlog_survives_lost_final_bookmarks(self):
         original = self.pipe.read
         def lose_periodic_bookmarks():

@@ -5,7 +5,7 @@ from autoSettingsUtils.utils import StringParameterInfo
 import synthDriverHandler
 import globalVars
 import ui
-import wx
+import queueHandler
 from logHandler import log
 from synthDriverHandler import VoiceInfo, synthIndexReached, synthDoneSpeaking
 from ._alvb import service
@@ -144,7 +144,7 @@ class SynthDriver(synthDriverHandler.SynthDriver):
     def _lost_connection(self, only_if_disconnected=False):
         synthDoneSpeaking.notify(synth=self)
         if service.settings()["fallback"] and (not only_if_disconnected or not self.client.connected):
-            wx.CallAfter(self._fallback, only_if_disconnected)
+            queueHandler.queueFunction(queueHandler.eventQueue, self._fallback, only_if_disconnected)
 
     def _fallback(self, only_if_disconnected=False):
         if only_if_disconnected and self.client.connected:

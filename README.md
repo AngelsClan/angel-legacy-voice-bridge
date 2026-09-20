@@ -1,10 +1,15 @@
 # Angel Legacy Voice Bridge
 
-Version 0.1.1 **beta** — an offline bridge from current Windows NVDA to licensed
+Development 0.1.2-dev1 — an offline bridge from current Windows NVDA to licensed
 SAPI 5 voices installed in a 32-bit Windows XP virtual machine.
 
-[Download the beta](https://github.com/AngelsClan/angel-legacy-voice-bridge/releases/tag/v0.1.1)
-· [Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
+**Release hold:** a serious NVDA freeze has been reported with 0.1.1. The exact
+cause remains unconfirmed. Do not rely on the bridge for primary speech or try
+to reproduce the problem if losing speech would leave you without assistance.
+Keep a dependable local synthesizer selected and the bridge disabled. Development
+diagnostics are not a claim that this accessibility-critical problem is fixed.
+
+[Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
 
 This project was made with the help of AI.
 
@@ -17,6 +22,35 @@ a system-wide SAPI voice. Start with mirroring/local speech available. It is a
 first beta, not yet a replacement for a dependable primary screen reader.
 
 ## What is included
+
+### Development diagnostics and privacy
+
+The development add-on writes `angelLegacyVoiceBridge-diagnostics.log` in the
+NVDA user-configuration directory. The logger runs even when bridge speech is
+disabled, so local-speech operation can be compared without connecting to XP.
+It records lifecycle events, numeric backlog/progress counters, and code
+locations when NVDA's main thread fails to process a heartbeat for three seconds.
+It does **not** record speech text, window titles, document contents, frame locals,
+passwords, or full source paths. Heartbeats are coalesced; repeated stall reports
+are limited to one every fifteen seconds.
+Code locations can include module/function names of other installed add-ons.
+This labelled diagnostic build enables logging by default; a public release
+needs an explicit diagnostics preference before the release hold is lifted.
+
+Disk writes happen on a separate daemon thread with a bounded 512-record queue.
+A slow disk drops diagnostic records instead of blocking speech. Idle backlog
+samples are reduced to once a minute. Transient write/rotation failures retry
+on later records and NVDA's normal log warns that evidence may be incomplete.
+The current log
+and two rotated copies use approximately 3 MiB total. This works with packaged
+NVDA, which does not include Python's `logging.handlers` module. No log uploads
+are automatic. A native call holding Python's GIL, abrupt process termination,
+or an unwritable disk can still prevent evidence from being recorded; this is
+not a guaranteed crash recorder or an automatic recovery mechanism. Fallback and
+emergency keyboard commands also cannot be guaranteed while NVDA itself is hung.
+
+Installing an updated add-on requires an NVDA restart at a safe time. Merely
+building this source does not update or restart an already running NVDA instance.
 
 - A selectable NVDA synthesizer with voice, rate, volume and pitch settings.
 - Optional mirroring: keep your regular NVDA voice and hear XP too.
@@ -57,28 +91,26 @@ not a tested/supported platform; contributors are welcome to qualify it.
 The build produces:
 
 1. `dist/XP Bridge/AngelLegacyVoiceBridge.exe` — copy this into XP.
-2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.1.nvda-addon` — install on the
-   modern Windows computer, **not** inside XP.
-3. `dist/AngelLegacyVoiceBridge-0.1.1-source.zip` — readable Python and native
+2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.2-dev1.nvda-addon` — diagnostic
+   candidate for isolated testing, **not** a cleared primary-speech update.
+3. `dist/AngelLegacyVoiceBridge-0.1.2-dev1-source.zip` — readable Python and native
    helper C++ source, build script, tests and documentation. No VM or voices.
 
-GitHub Releases provides the `.nvda-addon`, the standalone XP `.exe`, and this
-curated source ZIP. Download both executable components, not just GitHub's
-automatic source-code archive. You do not need Python or a compiler to use them.
+Historical GitHub Releases provide the `.nvda-addon`, standalone XP `.exe` and
+curated source ZIP. The release hold above supersedes those installation notes.
+This diagnostic candidate is not a new public release.
 
 Nothing is installed automatically by the build. Guest Additions/VMware Tools
 can help copy the helper, but the speech connection does not depend on them.
 An ISO attached to the VM is another offline way to transfer the helper.
 
-### Updating from 0.1.0
+### Update safety
 
-Install the 0.1.1 add-on over the existing add-on and restart NVDA when ready.
-Saved settings are retained. The XP helper and protocol are unchanged: leave
-your existing 0.1.0 helper running; no XP restart or helper replacement is needed.
-This update recovers missing speech bookmarks after confirmed completion and
-keeps long-packet preparation outside the lock used by NVDA's speech controls.
-It also adds text-free progress diagnostics. These fixes address reproduced
-queue failure cases, not a claim that every possible host/VM freeze is resolved.
+Keep the bridge disabled while the speech-loss incident is investigated. If a
+diagnostic build is installed at an agreed safe time, saved settings are retained;
+select a reliable local synthesizer and keep bridge startup/mirroring off first.
+The XP helper and protocol remain unchanged. Building or copying this source
+does not update an active NVDA process, and logging is not an automatic cure.
 
 ### VirtualBox configuration
 
