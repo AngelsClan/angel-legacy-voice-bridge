@@ -67,6 +67,44 @@ def wait_until(condition, seconds=2):
 
 
 class ClientTests(unittest.TestCase):
+    def test_progress_details_are_numeric_not_spoken_text(self):
+        from unittest.mock import Mock
+        self.client.close()
+        self.client.log = Mock()
+        self.client._active = (1, 2, time.monotonic())
+        self.client._active_details = (2, 17, 48000, 16, 30)
+        self.client._last_diagnostic = 0
+        self.client._log_progress(time.monotonic())
+        args = self.client.log.info.call_args.args
+        self.assertEqual(args[-5:], (2, 17, 48000, 16, 30))
+        self.assertTrue(all(isinstance(value, (int, float, bool)) for value in args[1:]))
+
+    def test_engine_error_identifies_fixed_code_without_speech_payload(self):
+        self.client.close()
+        for code in ("sapi-engine-failed", "sapi-completion-failed", "batch-speak-failed"):
+            with self.assertRaisesRegex(OSError, code):
+                self.client._process_line(["ERROR", self.client._session, "0", "1", code])
+        with self.assertRaises(OSError) as error:
+            self.client._process_line(["ERROR", self.client._session, "0", "1", "private synthetic payload"])
+        self.assertNotIn("private synthetic payload", str(error.exception))
+
+    def test_poll_notice_does_not_complete_speech_or_replay_canceled_indexes(self):
+        from unittest.mock import Mock
+        self.client.close()
+        self.events.clear()
+        self.client.log = Mock()
+        self.client._active = (10, 20, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        self.client._process_line(["NOTICE", self.client._session, "10", "20", "completion-polled"])
+        self.client.log.info.assert_called_once()
+        self.assertEqual(list(self.client._pending_indexes), [7])
+        self.assertEqual(self.events, [])
+        self.client.cancel()
+        self.client._process_line(["NOTICE", self.client._session, "10", "20", "completion-polled"])
+        self.client._process_line(["DONE", self.client._session, "10", "20"])
+        self.assertEqual(self.events, [])
+        self.client.log.info.assert_called_once()
+
     def test_slow_refresh_warning_cannot_hold_speech_state_lock(self):
         from unittest.mock import Mock
         entered, release = threading.Event(), threading.Event()

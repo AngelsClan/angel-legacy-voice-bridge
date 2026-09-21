@@ -492,6 +492,22 @@ void batchCommand(char** fields, unsigned int count) {
     sendLine(outgoing);
 }
 
+void finishSpeech() {
+    if (!speaking) return;
+    // SAPI can accept Speak asynchronously and fail later in the engine. Do
+    // not report that failure as successful (but silent) speech to NVDA.
+    SPVOICESTATUS status = {};
+    HRESULT result = voice->GetStatus(&status, NULL);
+    speaking = false;
+    batchSpeech = false;
+    if (FAILED(result) || FAILED(status.hrLastResult)) {
+        sendError("sapi-engine-failed");
+        return;
+    }
+    wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
+    sendLine(outgoing);
+}
+
 void speechEvents() {
     SPEVENT event;
     ULONG fetched;
@@ -501,14 +517,35 @@ void speechEvents() {
                 wsprintfA(outgoing, "INDEX\t%s\t%u\t%u\t%u", session, generation, requestId, static_cast<unsigned int>(event.wParam));
                 sendLine(outgoing);
             } else if (event.eEventId == SPEI_END_INPUT_STREAM) {
-                speaking = false;
-                batchSpeech = false;
-                wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
-                sendLine(outgoing);
+#ifndef ALVB_TEST_DROP_END_EVENTS
+                finishSpeech();
+#endif
             }
         }
         if (event.elParamType == SPET_LPARAM_IS_STRING || event.elParamType == SPET_LPARAM_IS_POINTER)
             CoTaskMemFree(reinterpret_cast<void*>(event.lParam));
+    }
+}
+
+void checkSpeechCompletion() {
+    // Drain bookmarks first. WaitUntilDone(0) polls actual SAPI completion;
+    // it does not guess duration or cut off a slow/paused voice. This also
+    // covers skipped text when an engine omits END_INPUT_STREAM.
+    speechEvents();
+    if (!speaking || paused) return;
+    HRESULT result = voice->WaitUntilDone(0);
+    if (result == S_OK) {
+        // Events can arrive between the first drain and the completion poll.
+        speechEvents();
+        if (!speaking) return;
+        if (batchSpeech) {
+            wsprintfA(outgoing, "NOTICE\t%s\t%u\t%u\tcompletion-polled", session, generation, requestId);
+            sendLine(outgoing);
+        }
+        finishSpeech();
+    } else if (FAILED(result)) {
+        stopSpeech();
+        sendError("sapi-completion-failed");
     }
 }
 
@@ -638,7 +675,10 @@ int runBridge() {
     if (FAILED(voice->SetInterest(interest, interest))) { logMessage("Cannot receive SAPI completion events."); return 2; }
     if (!openSerial(port)) { logMessage("Cannot open configured COM port. Check VM serial settings and other bridge instances."); return 3; }
     SetConsoleCtrlHandler(onConsoleEvent, TRUE);
-    logMessage("Angel Legacy Voice Bridge 0.1.0 beta. Waiting for the host. Ctrl+C exits.");
+    logMessage("Angel Legacy Voice Bridge 0.1.2-dev2. Waiting for the host. Ctrl+C exits.");
+#ifdef ALVB_TEST_DROP_END_EVENTS
+    logMessage("FAULT-INJECTION TEST ONLY: end events suppressed. Do not distribute this helper.");
+#endif
     unsigned int used = 0;
     bool discardingLine = false;
     unsigned int serialErrors = 0;
@@ -686,12 +726,7 @@ int runBridge() {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        speechEvents();
-        if (speaking && !batchSpeech && !paused && voice->WaitUntilDone(0) == S_OK) {
-            speaking = false;
-            wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
-            sendLine(outgoing);
-        }
+        checkSpeechCompletion();
         if (session[0] && static_cast<DWORD>(GetTickCount() - lastContact) > HEARTBEAT_TIMEOUT) {
             stopSpeech();
             session[0] = 0;

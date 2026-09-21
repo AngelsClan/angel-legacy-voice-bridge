@@ -1,6 +1,6 @@
 # Angel Legacy Voice Bridge
 
-Development 0.1.2-dev1 — an offline bridge from current Windows NVDA to licensed
+Development 0.1.2-dev2 — an offline bridge from current Windows NVDA to licensed
 SAPI 5 voices installed in a 32-bit Windows XP virtual machine.
 
 **Release hold:** a serious NVDA freeze has been reported with 0.1.1. The exact
@@ -22,6 +22,23 @@ a system-wide SAPI voice. Start with mirroring/local speech available. It is a
 first beta, not yet a replacement for a dependable primary screen reader.
 
 ## What is included
+
+### Skipped text and voice-engine recovery
+
+This development update requires replacing the XP helper as well as the add-on
+to obtain all improvements. The helper now checks actual SAPI completion without
+blocking, in addition to listening for completion events. It preserves bookmarks
+before reporting completion, including when a voice skips unsupported text.
+Asynchronous engine errors trigger the existing connection-failure/local-speech
+handling instead of being reported as successful silent speech. Keep automatic
+local fallback enabled. No timer guesses when a slow voice should have finished.
+
+An English-only voice still cannot pronounce every language or emoji. The bridge
+does not delete non-English text; voices that support it must still receive it.
+Microsoft Sam and installed third-party voices passed the documented protocol
+tests, but the reported intermittent silence was not reproduced. These changes
+do not lift the release hold above. Volume zero is not reliable mute for every
+legacy voice; use Disconnect or Disable bridge now to stop bridge speech.
 
 ### Development diagnostics and privacy
 

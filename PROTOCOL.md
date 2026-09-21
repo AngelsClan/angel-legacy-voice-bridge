@@ -123,6 +123,15 @@ late events from a replaced connection cannot advance new speech.
 
 ## Compatibility
 
+Development helper 0.1.2-dev2 retains protocol 2. It can send
+`NOTICE session generation requestID completion-polled` when nonblocking SAPI
+polling recovers a missing completion event. This is diagnostic only; the normal
+DONE still follows after success. Old hosts ignore NOTICE. The new host logs
+only this known notice for the active request. Engine or completion-query failures
+produce fixed codes `sapi-engine-failed` or `sapi-completion-failed` through ERROR,
+not DONE. Unknown error text is never copied to logs. Normal event completion and
+polling both retain stream/generation checks and drain queued bookmarks first.
+
 The new add-on requires protocol 2: replace both helper and add-on when updating
 this same-version beta. The helper also retains HELLO/READY version 1 for old
 host regression tests. Version 1 SPEAK fields are session, generation,

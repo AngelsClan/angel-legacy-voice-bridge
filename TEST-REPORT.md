@@ -1,5 +1,58 @@
 # Beta qualification
 
+## Skipped text / Microsoft Sam investigation — 2026-09-21
+
+Status: development 0.1.2-dev2, release hold unchanged. The exact intermittent
+user incident was not reproduced; do not call this a proven cure or ask the user
+to risk losing their only speech. No active NVDA restart was performed.
+
+- Baseline real-XP tests completed the reported `!В саду🌳⛅` example with Sam,
+  AT&T Mike and Crystal, including normal English afterward. Blank/symbol-only
+  and empty input also completed at 48 kHz and protocol rate 16, volume 30.
+- Candidate normal helper passed 36 cases across two rounds of all three voices
+  at 48 kHz, rate 16, volume 30. This includes returning to Sam after the other
+  engines. Completion was roughly 0.25–1.18 seconds for these short phrases;
+  this is whole-request duration, not speech-onset latency or an acoustic audit.
+- All three voices passed all five output formats, long multi-packet utterances
+  with one SAPI commit, and immediate close/cancel with the normal helper.
+- A separate hidden-desktop NVDA session using a fresh, muted profile passed
+  the real speech-manager path with all three XP voices and the example,
+  symbols, whitespace, empty text and following English. It returned to local
+  speech afterward. Initial harness runs did not select the bridge and were
+  discarded; the corrected run explicitly verified the selected driver. No
+  personal profile, real-user navigation or live TeamTalk traffic was used.
+  The isolated test process was closed by the harness's bounded process cleanup;
+  the user's running NVDA process was not replaced or restarted.
+- Fault-injection helper deliberately suppressed END_INPUT_STREAM handling.
+  All 18 Unicode/empty/English cases recovered through actual SAPI completion
+  polling, with exactly one recovery notice per request.
+- The faulted helper also passed protocol-1/2 handshakes, malformed-input
+  recovery, heartbeat expiry, and three paused-cancellation/reconnection runs.
+- With end events suppressed and every third received bookmark deliberately
+  omitted, 60 queued requests in two formats completed in order. Twenty missing
+  bookmarks were recovered; the largest inter-completion gap was 0.565 seconds.
+  Twenty rapid cancellations and bookmark-only/empty utterances also passed.
+- 116 Python unit/contract tests passed. New checks cover numeric diagnostics, fixed-code error
+  reporting without arbitrary guest content, and notices that cannot complete
+  speech or resurrect canceled indexes. Engine-error handling is tested with
+  injected host replies, not a naturally failing commercial engine.
+
+The first immediate transition between independent probe processes hit a
+temporary pipe-busy error; rerunning after release passed. One helper deployment
+attempt used an unsupported relative source path; no successful test result is
+claimed for that attempt. Corrected absolute-path transfer and launch succeeded.
+
+Claudius supplied a limited patch review. Suggestions about stale end events and
+uncaught ValueError did not apply to the surrounding stream guards and existing
+exception handler; those were checked directly. The broader follow-up review
+did not complete and was stopped. There is no claim of a full independent sign-off.
+
+Completion polling is nonblocking and follows bookmark-event draining. It uses
+[Microsoft's documented WaitUntilDone contract](https://learn.microsoft.com/en-us/previous-versions/office/developer/speech-technologies/jj149387(v=msdn.10)):
+success means pending speech calls have completed, not that a guessed timeout
+has expired. Text is not stripped solely because it is non-English. More
+diagnostics cannot guarantee capturing every engine or native-process failure.
+
 ## Emergency investigation — 2026-09-20, release HOLD
 
 The user reported loss of NVDA speech during window switching under heavy

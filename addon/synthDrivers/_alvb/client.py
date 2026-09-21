@@ -59,6 +59,7 @@ class BridgeClient:
         self._queue = deque()
         self._commands = deque()
         self._active = None
+        self._active_details = (0, 0, 0, 0, 0)
         self._request_id = 0
         self._session = ""
         self._pending_done = False
@@ -266,7 +267,18 @@ class BridgeClient:
             self.output_format = f"{rate} Hz, {bits}-bit, {channels} channel(s)"
         elif command == "ERROR" and len(fields) == 5 and fields[1] == self._session:
             # Fail safely to local speech rather than silently skip document text.
-            raise OSError("XP helper rejected a request; restarting the session")
+            # Only report known fixed codes: never log arbitrary guest payloads.
+            codes = {"sapi-engine-failed", "sapi-completion-failed", "batch-speak-failed",
+                     "sapi-speak-failed", "sapi-pause-failed", "invalid-begin",
+                     "invalid-batch", "invalid-line", "utterance-too-long"}
+            code = fields[4] if fields[4] in codes else "unrecognized-error"
+            raise OSError(f"XP helper rejected a request ({code}); restarting the session")
+        elif command == "NOTICE" and len(fields) == 5 and fields[1] == self._session:
+            if fields[4] == "completion-polled":
+                with self._lock:
+                    current = self._active and (int(fields[2]), int(fields[3])) == self._active[:2]
+                if current:
+                    self.log.info("XP completion confirmed by SAPI polling; recovering completion notification")
         elif command in ("ACCEPTED", "CANCELLED") and len(fields) in (3, 4) and fields[1] == self._session:
             pass
         else:
@@ -304,6 +316,13 @@ class BridgeClient:
                 self._frames = frames
                 self._pending_indexes = indexes
                 self._active_limit = limit
+                first_speech = next((item for item in items if isinstance(item, Speech)), None)
+                self._active_details = (
+                    first_speech.voice if first_speech else -1,
+                    sum(len(item.text) for item in items if isinstance(item, Speech)),
+                    quality,
+                    first_speech.rate if first_speech else 0,
+                    first_speech.volume if first_speech else 0)
 
     def _send_work(self, transport):
         self._prepare_utterance()
@@ -348,13 +367,15 @@ class BridgeClient:
             pending_indexes = len(self._pending_indexes)
             paused, waiting_ack = self._paused, self._waiting_ack
             enqueued, cancellations = self._enqueued_utterances, self._cancellations
+            voice_slot, characters, quality, rate, volume = self._active_details if self._active else (-1, 0, 0, 0, 0)
         # Counts and elapsed times only; never speech, voice tokens or paths.
         self.log.info(
             "Bridge progress: queued=%d frames=%d active_seconds=%.2f paused=%s "
             "waiting_ack=%s pending_indexes=%d completed=%d recovered_indexes=%d reply_age=%.2f "
-            "enqueued=%d cancellations=%d",
+            "enqueued=%d cancellations=%d voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
             queued, frames, active_seconds, paused, waiting_ack, pending_indexes,
-            self._completed_utterances, self._recovered_indexes, now - self._last_receive, enqueued, cancellations)
+            self._completed_utterances, self._recovered_indexes, now - self._last_receive, enqueued, cancellations,
+            voice_slot, characters, quality, rate, volume)
 
     def _session_loop(self, transport):
         with self._lock:

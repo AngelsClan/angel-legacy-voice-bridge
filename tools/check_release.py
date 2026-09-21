@@ -5,7 +5,7 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.2-dev1"
+VERSION = "0.1.2-dev2"
 
 
 def check_archive(path):
@@ -34,6 +34,8 @@ def main():
     for path in paths:
         if path.suffix != ".exe":
             check_archive(path)
+        else:
+            assert b"FAULT-INJECTION TEST ONLY" not in path.read_bytes(), "Refusing test-only helper"
         expected = path.with_suffix(path.suffix + ".sha256").read_text(encoding="ascii").split()[0]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, path.name
         print(f"PASS SHA-256: {path.name}")

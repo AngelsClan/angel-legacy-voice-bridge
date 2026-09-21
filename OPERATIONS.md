@@ -141,6 +141,29 @@ actual host. The helper still needs a logged-in audio session.
 
 ## Diagnostics and reporting
 
+### Skipped text and voice switching
+
+With the bridge disconnected, `python tools/unicode_probe.py --pipe PIPE
+--quality 48000 --rounds 2` checks English, Cyrillic/emoji, symbols, whitespace,
+empty text and subsequent English with each installed voice. It is muted by
+default; `--volume 30 --rate 16` explicitly requests audible synthetic phrases.
+Speech rate is the protocol's 0..20 scale, not the NVDA settings-ring percentage.
+This checks completion and bookmarks, not a human judgment of sound quality.
+
+Developers can build a separate end-event fault-injection helper with
+`python -c "import build; print(build.build_bridge(test_drop_end_events=True))"`.
+That executable is under `build/completion-test`, never `dist/XP Bridge`.
+Stop the normal helper, back it up, then temporarily run this test helper on an
+isolated guest. `unicode_probe.py --expect-polled` requires every tested utterance
+to complete through SAPI polling. Run the integration and burst probes too.
+Always restore the normal helper from a fresh `python build.py` build afterward.
+Do not distribute the test-only executable or restart a user's active NVDA.
+
+The development helper must be updated to obtain completion polling. The
+development add-on supplies the corresponding fixed-code diagnostics. Old hosts
+ignore the optional NOTICE; older helpers do not acquire polling from an add-on
+update alone. No settings migration or personal voice preset is packaged.
+
 For a muted backlog test with the bridge disconnected, run
 `python tools/burst_probe.py --pipe PIPE --count 60`. The optional
 `--drop-index-every 3` deliberately omits some received bookmark notifications

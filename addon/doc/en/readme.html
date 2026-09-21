@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Angel Legacy Voice Bridge help</title></head>
 <body>
-<h1>Angel Legacy Voice Bridge 0.1.2-dev1 — diagnostic development build</h1>
+<h1>Angel Legacy Voice Bridge 0.1.2-dev2 — diagnostic development build</h1>
 <p><strong>Release hold:</strong> an NVDA freeze with loss of speech remains unresolved. Keep reliable local speech selected and bridge operation disabled. This build is not a verified cure; do not reproduce the issue if losing speech would leave you without assistance.</p>
 <p>Text-free diagnostics run even with the bridge disabled. The NVDA configuration directory contains angelLegacyVoiceBridge-diagnostics.log and up to two rotated copies (about 3 MiB total). Records include timing, queue counts and stalled code locations, not spoken text, window titles or credentials. Disk writes run separately and drop excess records rather than blocking speech. A hard native hang or process termination may still prevent capture. Logs are not uploaded.</p>
 <p>Angels Clan. Use licensed SAPI 5 voices installed in an offline, 32-bit Windows XP virtual machine with modern Windows NVDA. XP speaks through its own virtual sound card. Neither internet access nor NVDA inside XP is required. Voice engines are not included.</p>
@@ -11,8 +11,9 @@
 <h2>Two parts to install</h2>
 <ol>
 <li>Copy the release's XP Bridge folder to XP. The console program is AngelLegacyVoiceBridge.exe; double-click it after configuring the virtual serial port below. Leave it open and Alt+Tab away. Control+C exits.</li>
-<li>Development packages are not automatically installed. Only arrange installation and an NVDA restart at a safe time with reliable recovery speech. Do not install the add-on in XP. The helper is unchanged.</li>
+<li>Development packages are not automatically installed. Only arrange installation and an NVDA restart at a safe time with reliable recovery speech. Do not install the add-on in XP. This update also replaces the XP helper: stop the old helper, replace its executable, then start it again. XP does not need to reboot.</li>
 </ol>
+<p>The helper now polls actual speech completion without blocking, to recover missing completion events after skipped text. It also reports asynchronous voice-engine failures. This does not teach an English-only voice to read other languages and does not establish that the reported intermittent silence is fixed. Diagnostics include numeric voice slot, text length, format, rate and volume, but never speech text. Some legacy engines remain audible at volume zero; Disconnect or Disable bridge now stops bridge speech.</p>
 <h2>VirtualBox setup</h2>
 <p>Shut XP down normally before editing virtual hardware. In VirtualBox Settings, Serial Ports, enable port 1: COM1, I/O 0x3F8, IRQ 4, Host Pipe. Set the path to <code>\\.\pipe\AngelLegacySpeech-XP</code>. Leave “Connect to existing pipe” unchecked: VirtualBox creates the pipe. Keep XP network adapters disabled. Start XP with its visible window.</p>
 <p>The default is generic, not tied to one VM. Choose another name beginning <code>\\.\pipe\AngelLegacySpeech-</code> if needed; enter exactly the same name in the add-on. With the default selected, a single matching running pipe is detected automatically. Detect running VM pipes lets you choose among multiple VMs. It does not configure or start a VM. Do not run two bridge clients on one pipe. COM1 is the helper default; --com2, --com3 or --com4 select another deliberately configured port.</p>

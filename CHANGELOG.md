@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2-dev2 — completion recovery, release still on hold
+
+- Check nonblocking SAPI completion after draining events, so a missing stream
+  end event cannot leave an already-finished utterance waiting indefinitely.
+- Preserve bookmark order, cancellation generations and paused speech. Check
+  asynchronous SAPI engine failure instead of reporting silent success.
+- Add fixed-code failure reasons and numeric voice/format/rate/volume/length
+  diagnostics; never log spoken text or arbitrary guest error payloads.
+- Add repeatable Unicode/empty-text/voice-switching probes and a separately
+  built test-only helper that deliberately suppresses end events.
+- Both helper and add-on are updated. Intermittent user-reported silence and
+  the historical NVDA freeze are not claimed reproduced or conclusively fixed.
+
 ## 0.1.2-dev1 — unreleased diagnostics, release on hold
 
 - Preserve the reported speech-loss incident as unresolved; passing isolated

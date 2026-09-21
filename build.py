@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.1.2-dev1"
+VERSION = "0.1.2-dev2"
 
 
 def find_tools():
@@ -25,23 +25,25 @@ def find_tools():
     return compiler_root, kits, sdk
 
 
-def build_bridge():
+def build_bridge(test_drop_end_events=False):
     compiler, kits, sdk = find_tools()
     environment = os.environ.copy()
     environment["INCLUDE"] = ";".join(map(str, [compiler / "include", kits / "Include" / sdk / "ucrt",
                                                kits / "Include" / sdk / "shared", kits / "Include" / sdk / "um"]))
     environment["LIB"] = str(kits / "Lib" / sdk / "um/x86")
-    output = ROOT / "build"
-    output.mkdir(exist_ok=True)
+    output = ROOT / "build" / ("completion-test" if test_drop_end_events else "release")
+    output.mkdir(parents=True, exist_ok=True)
     cl = compiler / "bin/Hostx64/x86/cl.exe"
     link = compiler / "bin/Hostx64/x86/link.exe"
     # /GS- and /NODEFAULTLIB avoid newer CRT imports. Buffers have explicit bounds;
     # this is a compatibility compromise, not a claim of modern exploit mitigation.
+    defines = ["/DALVB_TEST_DROP_END_EVENTS"] if test_drop_end_events else []
     for filename in ("main", "runtime"):
         subprocess.run([str(cl), "/nologo", "/c", "/W4", "/GS-", "/GR-", "/Zl", "/Od",
                         "/D_UNICODE", "/DUNICODE", "/Fo" + str(output / (filename + ".obj")),
-                        str(ROOT / "bridge" / (filename + ".cpp"))], env=environment, check=True)
-    destination = ROOT / "dist/XP Bridge"
+                        str(ROOT / "bridge" / (filename + ".cpp")), *defines], env=environment, check=True)
+    # Fault injection must never replace the distributable helper.
+    destination = ROOT / ("build/completion-test" if test_drop_end_events else "dist/XP Bridge")
     destination.mkdir(parents=True, exist_ok=True)
     executable = destination / "AngelLegacyVoiceBridge.exe"
     subprocess.run([str(link), "/NOLOGO", "/NODEFAULTLIB", "/MACHINE:X86", "/SUBSYSTEM:CONSOLE,5.01",

@@ -1,10 +1,19 @@
 # Angel Legacy Voice Bridge — release hold
 
-0.1.2-dev1 is a diagnostic development candidate, not a cleared release.
+0.1.2-dev2 is a diagnostic development candidate, not a cleared release.
 An accessibility-critical NVDA freeze reported against 0.1.1 remains unresolved.
 Keep local speech selected and bridge operation disabled. See TEST-REPORT.md
 for verified fixes, isolated tests and their limits. No user reproduction is
 required or requested. New logs are bounded and exclude spoken content.
+
+This candidate improves skipped-text completion recovery and engine-error
+reporting. Replace the XP helper while it is stopped, then install the new
+add-on and restart NVDA only at a safe time. Neither the build nor the helper
+restarts NVDA. Preserve local speech and existing settings. The development
+package is `AngelLegacyVoiceBridge-0.1.2-dev2.nvda-addon`.
+
+Passing synthetic and deliberately faulted tests is not confirmation that the
+reported intermittent Microsoft Sam silence or unsupported-text pause is cured.
 
 ## Historical 0.1.1 beta notes (superseded by the hold above)
 
