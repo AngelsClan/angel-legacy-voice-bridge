@@ -1,5 +1,47 @@
 # Beta qualification
 
+This is the evidence log, newest first. Each section records what was actually
+tested on a given day, with the result and the limits of that result; a section
+is never rewritten once its work is done. Statements of the form "not
+reproduced" or "not qualified" mean exactly that and are not claims of absence.
+For setup and use, see [README.md](README.md); for the current release state,
+see [RELEASE-NOTES.md](RELEASE-NOTES.md).
+
+## Documentation pass — 2026-09-22
+
+Documentation only; no source, version or behaviour change, and the release
+hold is unchanged.
+
+Every user-visible claim in README.md was checked against the add-on and helper
+source. Two statements were wrong and are corrected: the settings table named
+the fallback checkbox "Use local eSpeak if the bridge synthesizer disconnects"
+when the shipped label is "Restore local eSpeak if bridge speech disconnects",
+and the XP output format was described with wording that does not match the
+five labels the settings ring actually reads out. Five behaviours were
+undocumented and are now described: the 15-second timeout on each individual
+recovery probe, the extra 25-second wait after an incomplete voice scan, the
+four-second scan timeout that pauses scanning until the next reconnect, the
+decision to leave the catalog unchanged rather than truncate it when XP reports
+more than 128 voices, and the spoken confirmations "Bridge disabled. Local
+speech only." and "Legacy bridge unavailable. Switched to local eSpeak."
+
+Confirmed unchanged and correct: the five-second idle rescan, the 128-token
+limit, 16,000 characters / 256 items / 64 queued utterances, the one-second
+retry, the two-second handshake allowance, the four-second no-reply and
+acknowledgement timeouts, the guest's six-second purge, the 120-second plus
+half-second-per-character completion limit, the 512-record diagnostics queue
+and roughly 3 MiB of logs, the 5-to-60-second probe backoff, 12 attempts or 15
+minutes, three returns per ten minutes, the 5/10/20-second escalation, the
+eight-second idle wait, all recovery announcements, NVDA+Shift+F11, the
+synthesizer's display name, and NVDA 2026.1 through 2026.2.
+
+Checks run: 147 unit tests pass; `build.py --package-only` repackaged the
+add-on and source zip with the rebuilt help, leaving the already-tested helper
+binary untouched; `tools/check_release.py` passed every archive boundary and
+SHA-256 check; the add-on help parses with no unclosed tags or unescaped
+ampersands; every internal README link resolves. No installation, no release
+and no live speech testing was part of this pass.
+
 ## Diagnostics preference — 2026-09-22
 
 147 unit tests pass, including the switchable logger (lazy creation, follows
