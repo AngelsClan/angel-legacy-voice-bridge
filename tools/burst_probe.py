@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pipe", default=DEFAULT_PIPE)
     parser.add_argument("--count", type=int, default=40)
+    parser.add_argument("--voice", default="Mike", help="Substring of the installed voice name")
     parser.add_argument("--drop-index-every", type=int, default=0,
                         help="Fault injection: omit every Nth received INDEX line")
     args = parser.parse_args()
@@ -51,7 +52,7 @@ def main():
     started = time.monotonic()
     try:
         wait_until(lambda: client.connected)
-        voice = next((i for i, name in client.voices.items() if "Mike" in name), next(iter(client.voices)))
+        voice = next(i for i, name in client.voices.items() if args.voice in name)
         for quality in (0, 48000):
             client.quality = quality
             events.clear()
