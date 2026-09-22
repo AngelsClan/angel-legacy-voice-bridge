@@ -146,6 +146,38 @@ void sendError(const char* code) {
     logMessage(code);
 }
 
+// Fixed numeric diagnostics only: never retain utterances, token paths or names.
+// Keep a small helper-side record even when an older add-on ignores SAPIERROR.
+void reportSapiFailure(unsigned int stage, HRESULT result, unsigned int slot, unsigned int quality) {
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    char record[256];
+    wsprintfA(record, "%04u-%02u-%02u %02u:%02u:%02u stage=%u HRESULT=%08lX voice_slot=%u quality=%u\r\n",
+              now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+              stage, static_cast<DWORD>(result), slot, quality);
+    WCHAR path[MAX_PATH];
+    DWORD length = GetModuleFileNameW(NULL, path, MAX_PATH);
+    if (length && length < MAX_PATH) {
+        while (length && path[length - 1] != L'\\') --length;
+        if (length && length < MAX_PATH - 32) {
+            lstrcpyW(path + length, L"bridge-sapi-errors.log");
+            HANDLE log = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (log != INVALID_HANDLE_VALUE) {
+                DWORD size = GetFileSize(log, NULL);
+                if (size != INVALID_FILE_SIZE && size >= 1024 * 1024) SetEndOfFile(log);
+                SetFilePointer(log, 0, NULL, FILE_END);
+                DWORD written;
+                WriteFile(log, record, lstrlenA(record), &written, NULL);
+                CloseHandle(log);
+            }
+        }
+    }
+    wsprintfA(outgoing, "SAPIERROR\t%s\t%u\t%u\t%u\t%lu\t%u\t%u",
+              session, generation, requestId, stage, static_cast<DWORD>(result), slot, quality);
+    sendLine(outgoing);
+}
+
 bool maximizePlaybackLine(HMIXER mixer, const MIXERLINEW& line) {
     MIXERCONTROLW control = {};
     control.cbStruct = sizeof(control);
@@ -321,6 +353,62 @@ void makeSpeechXml(unsigned int pitch, bool spell) {
     lstrcatW(speechXml, L"</pitch>");
 }
 
+HRESULT selectVoice(unsigned int slot) {
+    if (selectedVoice == static_cast<int>(slot)) return S_OK;
+    // Catalog objects may still hold a deleted registry key after reinstall.
+    // Resolve the stable ID afresh; catalog slots remain unchanged for NVDA.
+    ISpObjectToken* current = NULL;
+    HRESULT result = CoCreateInstance(CLSID_SpObjectToken, NULL, CLSCTX_INPROC_SERVER,
+                                      IID_ISpObjectToken, reinterpret_cast<void**>(&current));
+    if (SUCCEEDED(result)) result = current->SetId(NULL, voiceIds[slot], FALSE);
+    if (SUCCEEDED(result)) result = voice->SetVoice(current);
+    if (current) current->Release();
+    if (SUCCEEDED(result)) selectedVoice = slot;
+    return result;
+}
+
+HRESULT setOutputQuality(unsigned int sampleRate);
+
+HRESULT speakXml(unsigned int slot, const WCHAR* xml, ULONG* stream) {
+    HRESULT result = voice->Speak(xml, SPF_ASYNC | SPF_IS_XML, stream);
+    if (result != HRESULT_FROM_WIN32(ERROR_KEY_DELETED)) return result;
+    // Reinstalling the currently selected voice can invalidate its token too.
+    // Retry only this synchronous rejection, once. Never replay accepted speech
+    // or suppress other engine failures that must trigger local-speech fallback.
+    reportSapiFailure(5, result, slot, selectedQuality < 0 ? 0 : selectedQuality);
+    // SpVoice caches engines by token ID. A fresh token alone is insufficient
+    // when the selected engine already owns the deleted registration handle.
+    long rate = 0;
+    USHORT volume = 100;
+    result = voice->GetRate(&rate);
+    if (SUCCEEDED(result)) result = voice->GetVolume(&volume);
+    if (FAILED(result)) return result;
+    ISpVoice* replacement = NULL;
+    result = CoCreateInstance(CLSID_SpVoice, NULL, CLSCTX_INPROC_SERVER,
+                              IID_ISpVoice, reinterpret_cast<void**>(&replacement));
+    if (FAILED(result)) return result;
+    ULONGLONG interest = SPFEI(SPEI_END_INPUT_STREAM) | SPFEI(SPEI_TTS_BOOKMARK);
+    result = replacement->SetInterest(interest, interest);
+    if (SUCCEEDED(result) && paused) result = replacement->Pause();
+    if (FAILED(result)) { replacement->Release(); return result; }
+    voice->Speak(NULL, SPF_PURGEBEFORESPEAK, NULL);
+    voice->Release();
+    voice = replacement;
+    unsigned int quality = selectedQuality < 0 ? 0 : selectedQuality;
+    selectedVoice = -1;
+    selectedQuality = -1;
+    result = selectVoice(slot);
+    if (SUCCEEDED(result)) result = setOutputQuality(quality);
+    if (SUCCEEDED(result)) result = voice->SetRate(rate);
+    if (SUCCEEDED(result)) result = voice->SetVolume(volume);
+    if (SUCCEEDED(result)) result = voice->Speak(xml, SPF_ASYNC | SPF_IS_XML, stream);
+    if (SUCCEEDED(result)) {
+        wsprintfA(outgoing, "NOTICE\t%s\t%u\t%u\tvoice-token-refreshed", session, generation, requestId);
+        sendLine(outgoing);
+    }
+    return result;
+}
+
 void speakCommand(char** fields, unsigned int count) {
     unsigned int newGeneration, newRequest, voiceIndex, rate, volume, pitch, spell;
     if (count != 11 ||
@@ -336,15 +424,11 @@ void speakCommand(char** fields, unsigned int count) {
     if (newGeneration != generation) return;
     if (speaking) { sendError("speech-already-active"); return; }
     requestId = newRequest;
-    HRESULT result = S_OK;
-    if (selectedVoice != static_cast<int>(voiceIndex)) {
-        result = voice->SetVoice(voices[voiceIndex]);
-        if (SUCCEEDED(result)) selectedVoice = voiceIndex;
-    }
+    HRESULT result = selectVoice(voiceIndex);
     if (SUCCEEDED(result)) result = voice->SetRate(static_cast<int>(rate) - 10);
     if (SUCCEEDED(result)) result = voice->SetVolume(static_cast<USHORT>(volume));
     makeSpeechXml(pitch, spell != 0);
-    if (SUCCEEDED(result)) result = voice->Speak(speechXml, SPF_ASYNC | SPF_IS_XML, NULL);
+    if (SUCCEEDED(result)) result = speakXml(voiceIndex, speechXml, NULL);
     if (FAILED(result)) { sendError("sapi-speak-failed"); return; }
     speaking = true;
     wsprintfA(outgoing, "ACCEPTED\t%s\t%u\t%u", session, generation, requestId);
@@ -390,15 +474,15 @@ bool appendSpeechPart(unsigned int rate, unsigned int volume, unsigned int pitch
     return true;
 }
 
-bool setOutputQuality(unsigned int sampleRate) {
-    if (selectedQuality == static_cast<int>(sampleRate)) return true;
+HRESULT setOutputQuality(unsigned int sampleRate) {
+    if (selectedQuality == static_cast<int>(sampleRate)) return S_OK;
     HRESULT result;
     if (!sampleRate) result = voice->SetOutput(NULL, TRUE);
     else {
         ISpAudio* output = NULL;
         result = CoCreateInstance(CLSID_SpMMAudioOut, NULL, CLSCTX_INPROC_SERVER,
                                   IID_ISpAudio, reinterpret_cast<void**>(&output));
-        if (FAILED(result)) return false;
+        if (FAILED(result)) return result;
         WAVEFORMATEX format = {};
         format.wFormatTag = WAVE_FORMAT_PCM;
         format.nChannels = 1;
@@ -411,7 +495,7 @@ bool setOutputQuality(unsigned int sampleRate) {
         output->Release();
     }
     if (SUCCEEDED(result)) selectedQuality = sampleRate;
-    return SUCCEEDED(result);
+    return result;
 }
 
 void reportFormat() {
@@ -469,16 +553,19 @@ void batchCommand(char** fields, unsigned int count) {
         } else if (!lstrcmpA(fields[0], "COMMIT") && count == 4) {
             if (!closeStyle()) { stopSpeech(); sendError("utterance-too-long"); return; }
             assembling = false;
-            HRESULT result = S_OK;
-            if (selectedVoice != static_cast<int>(batchVoice)) {
-                result = voice->SetVoice(voices[batchVoice]);
-                if (SUCCEEDED(result)) selectedVoice = batchVoice;
+            HRESULT result = selectVoice(batchVoice);
+            unsigned int stage = 1;
+            if (SUCCEEDED(result)) { stage = 2; result = setOutputQuality(batchQuality); }
+            if (SUCCEEDED(result)) { stage = 3; result = voice->SetRate(0); }
+            if (SUCCEEDED(result)) { stage = 4; result = voice->SetVolume(100); }
+            if (SUCCEEDED(result) && xmlUsed) {
+                stage = 5;
+                result = speakXml(batchVoice, utteranceXml, &activeStream);
             }
-            if (SUCCEEDED(result) && !setOutputQuality(batchQuality)) result = E_FAIL;
-            if (SUCCEEDED(result)) result = voice->SetRate(0);
-            if (SUCCEEDED(result)) result = voice->SetVolume(100);
-            if (SUCCEEDED(result) && xmlUsed) result = voice->Speak(utteranceXml, SPF_ASYNC | SPF_IS_XML, &activeStream);
-            if (FAILED(result)) { sendError("batch-speak-failed"); return; }
+            if (FAILED(result)) {
+                reportSapiFailure(stage, result, batchVoice, batchQuality);
+                sendError("batch-speak-failed"); return;
+            }
             speaking = xmlUsed != 0;
             batchSpeech = speaking;
             reportFormat();
@@ -501,6 +588,8 @@ void finishSpeech() {
     speaking = false;
     batchSpeech = false;
     if (FAILED(result) || FAILED(status.hrLastResult)) {
+        reportSapiFailure(FAILED(result) ? 6 : 7, FAILED(result) ? result : status.hrLastResult,
+                          selectedVoice < 0 ? MAX_VOICES : selectedVoice, batchQuality);
         sendError("sapi-engine-failed");
         return;
     }

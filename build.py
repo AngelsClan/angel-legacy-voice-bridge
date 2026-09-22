@@ -1,5 +1,6 @@
 """Build the XP helper and a deterministic add-on; never install either one."""
 from pathlib import Path
+import argparse
 import hashlib
 import os
 import py_compile
@@ -93,7 +94,14 @@ def build_source():
 
 
 if __name__ == "__main__":
-    paths = [build_bridge(), build_addon(), build_source()]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--package-only", action="store_true",
+                        help="Keep the already-tested helper binary; refresh add-on, source and hashes")
+    args = parser.parse_args()
+    helper = ROOT / "dist/XP Bridge/AngelLegacyVoiceBridge.exe"
+    if args.package_only and not helper.is_file():
+        parser.error("Build and test the XP helper before packaging it")
+    paths = [helper if args.package_only else build_bridge(), build_addon(), build_source()]
     for source in ("README.md", "PROTOCOL.md", "TEST-REPORT.md", "PUBLICATION.md", "OPERATIONS.md", "LICENSE"):
         if (ROOT / source).exists():
             shutil.copy2(ROOT / source, ROOT / "dist" / source)

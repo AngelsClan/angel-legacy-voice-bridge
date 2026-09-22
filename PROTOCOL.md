@@ -59,6 +59,7 @@ The helper maps rate and pitch to -10 through +10. Voice index is 0–127.
 | XP → host | FORMAT, session, sampleRate, bits, channels |
 | XP → host | DONE, session, generation, requestID |
 | XP → host | ERROR, session, generation, requestID, fixed-error-code |
+| XP → host, optional diagnostic | SAPIERROR, session, generation, requestID, stage, unsignedHRESULT, voiceIndex, outputFormat |
 
 BEGIN/PART/MARK/BREAK/COMMIT are individually acknowledged. COMMIT submits one
 SAPI utterance. Consecutive PARTs with the same settings share surrounding XML
@@ -122,6 +123,16 @@ real-time guarantees. NVDA callbacks also carry generation/source checks so
 late events from a replaced connection cannot advance new speech.
 
 ## Compatibility
+
+SAPIERROR contains numeric metadata only. Stages are 1=voice selection,
+2=output format, 3=rate, 4=volume, 5=Speak, 6=GetStatus, 7=asynchronous result.
+Old hosts ignore it. It never completes an utterance or suppresses ERROR.
+An ERROR_KEY_DELETED diagnostic can precede a successful bounded retry; it is
+not itself a terminal result. Only a synchronously rejected Speak with that
+exact HRESULT is retried, once, using fresh SAPI objects and restored settings.
+Normal DONE/ERROR semantics still determine the outcome.
+`NOTICE session generation requestID voice-token-refreshed` reports that the
+one-time retry was accepted. It is not completion; old hosts safely ignore it.
 
 Development helper 0.1.2-dev2 retains protocol 2. It can send
 `NOTICE session generation requestID completion-polled` when nonblocking SAPI
