@@ -55,6 +55,25 @@ def module(name, **attributes):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_toggle_command_switches_auto_return_and_announces(self):
+        plugin = self.plugin.GlobalPlugin()
+        message = self.plugin.ui.message
+        plugin.script_toggleAutoReturn(None)
+        self.assertTrue(self.settings["autoReturn"])
+        message.assert_called_with("Automatic return to the bridge on")
+        self.service.clear_recovery.assert_not_called()
+        plugin.script_toggleAutoReturn(None)
+        self.assertFalse(self.settings["autoReturn"])
+        message.assert_called_with("Automatic return to the bridge off")
+        self.service.clear_recovery.assert_called_once_with()
+        plugin.terminate()
+
+    def test_profile_switch_cancels_pending_return_for_plugin_lifetime(self):
+        plugin = self.plugin.GlobalPlugin()
+        self.profile_switch.register.assert_called_once_with(self.service.clear_recovery)
+        plugin.terminate()
+        self.profile_switch.unregister.assert_called_once_with(self.service.clear_recovery)
+
     def test_failed_diagnostics_and_startup_preserve_plugin_controls(self):
         self.service.start_diagnostics.side_effect = RuntimeError("No thread resources")
         self.service.ensure_client.side_effect = RuntimeError("No transport resources")
@@ -102,7 +121,8 @@ class AdapterTests(unittest.TestCase):
         self.service = module("service", settings=lambda: self.settings, client=self.client,
                               ensure_client=Mock(return_value=self.client), stop=Mock(),
                               start_diagnostics=Mock(), stop_diagnostics=Mock(),
-                              listeners=[], testing=False, disable=Mock(), finish_test=Mock(), arm_recovery=Mock(), clear_recovery=Mock())
+                              listeners=[], testing=False, disable=Mock(), finish_test=Mock(), arm_recovery=Mock(), clear_recovery=Mock(),
+                              diagnostics=Mock(return_value=Mock()), speech_backlog_counts=Mock(return_value=(30000, 1, 0)))
         self.handler = module("synthDriverHandler", SynthDriver=Base,
                               getSynth=Mock(return_value=types.SimpleNamespace(name="espeak")),
                               setSynth=Mock(), VoiceInfo=lambda token, name: (token, name),
@@ -116,7 +136,10 @@ class AdapterTests(unittest.TestCase):
         package = module("synthDrivers", __path__=[str(ROOT / "addon/synthDrivers")])
         shared = module("synthDrivers._alvb", __path__=[], service=self.service)
         speech_extensions = types.SimpleNamespace(pre_speechQueued=Mock(), speechCanceled=Mock(), post_speechPaused=Mock())
+        self.cancel_speech = Mock()
+        self.profile_switch = Mock()
         modules = {
+            "config": module("config", post_configProfileSwitch=self.profile_switch),
             "autoSettingsUtils": module("autoSettingsUtils", __path__=[]),
             "autoSettingsUtils.driverSetting": module("autoSettingsUtils.driverSetting",
                 DriverSetting=lambda id, label, **options: types.SimpleNamespace(id=id, label=label, **options)),
@@ -127,7 +150,7 @@ class AdapterTests(unittest.TestCase):
             "gui.settingsDialogs": module("gui.settingsDialogs", SettingsPanel=Base,
                 NVDASettingsDialog=types.SimpleNamespace(categoryClasses=[])),
             "scriptHandler": module("scriptHandler", script=lambda **kwargs: lambda function: function),
-            "speech": module("speech", extensions=speech_extensions),
+            "speech": module("speech", extensions=speech_extensions, cancelSpeech=self.cancel_speech),
             "synthDriverHandler": self.handler, "ui": module("ui", message=Mock()),
             "wx": self.wx, "logHandler": module("logHandler", log=Mock()),
             "queueHandler": module("queueHandler", eventQueue=object(), queueFunction=lambda queue, fn, *args: fn(*args)),
@@ -173,6 +196,7 @@ class AdapterTests(unittest.TestCase):
     def test_connection_label_tracks_connected_retrying_and_stopped(self):
         panel = self.panel()
         panel._quality_value = 0
+        panel._autoReturn_value = False
         panel._catalog = ((0, "Test Mike", "token"),)
         panel.status = Mock()
         panel.buttons = {name: Mock() for name in ("onStop", "onTest", "onToggleConnection")}
@@ -184,6 +208,21 @@ class AdapterTests(unittest.TestCase):
                 client.connected = label == "&Disconnect"
             self.plugin.BridgePanel.onRefresh(panel, None)
             panel.buttons["onToggleConnection"].SetLabel.assert_called_with(label)
+
+    def test_open_panel_follows_toggle_command_so_apply_cannot_revert_it(self):
+        panel = self.panel()
+        panel._quality_value = 0
+        panel._autoReturn_value = False
+        panel._catalog = ((0, "Test Mike", "token"),)
+        panel.status = Mock()
+        panel.buttons = {name: Mock() for name in ("onStop", "onTest", "onToggleConnection")}
+        self.client.full_xp_volume = False
+        self.client.status = "Test status"
+        self.settings["autoReturn"] = True  # Changed by the command meanwhile.
+        self.plugin.BridgePanel.onRefresh(panel, None)
+        self.assertTrue(panel.autoReturn.value)
+        panel.onSave()
+        self.assertTrue(self.settings["autoReturn"])
 
     def test_disabled_panel_can_save_recovery_preferences_without_connecting(self):
         panel = self.panel()
@@ -292,6 +331,27 @@ class AdapterTests(unittest.TestCase):
         self.client.connected = False
         synth._event("disconnected", "Test failure")
         self.handler.setSynth.assert_called_once_with("espeak")
+        self.cancel_speech.assert_called_once()
+
+    def test_fallback_clears_abandoned_indexes_before_changing_synth(self):
+        synth = self.synth.SynthDriver()
+        self.handler.getSynth.return_value = synth
+        self.client.connected = False
+        pending = [object()] * 30000
+        self.cancel_speech.side_effect = pending.clear
+        def select(name):
+            self.assertEqual(pending, [])
+            return True
+        self.handler.setSynth.side_effect = select
+        synth._event("disconnected", "Test engine failure")
+        self.handler.setSynth.assert_called_once_with("espeak")
+
+    def test_reconnected_session_still_clears_lost_indexes(self):
+        synth = self.synth.SynthDriver()
+        self.handler.getSynth.return_value = synth
+        synth._event("disconnected", "Test engine failure")
+        self.cancel_speech.assert_called_once()
+        self.handler.setSynth.assert_not_called()
 
     def test_disabled_fallback_does_not_replace_synth(self):
         synth = self.synth.SynthDriver()
@@ -300,6 +360,7 @@ class AdapterTests(unittest.TestCase):
         self.settings["fallback"] = False
         synth._event("disconnected", "Test failure")
         self.handler.setSynth.assert_not_called()
+        self.cancel_speech.assert_called_once()
 
     def test_voice_refresh_updates_ring(self):
         synth = self.synth.SynthDriver()
@@ -322,10 +383,11 @@ class AdapterTests(unittest.TestCase):
             self.synth.SynthDriver()
         self.service.stop.assert_called_once()
 
-    def test_late_disconnect_releases_manager_without_unneeded_fallback(self):
+    def test_late_disconnect_does_not_cancel_another_synth(self):
         synth = self.synth.SynthDriver()
         synth._event("disconnected", "Old connection dropped")
-        self.handler.synthDoneSpeaking.notify.assert_called_once_with(synth=synth)
+        self.cancel_speech.assert_not_called()
+        self.handler.synthDoneSpeaking.notify.assert_not_called()
         self.handler.setSynth.assert_not_called()
 
     def test_voice_removed_after_refresh_has_accessible_error(self):
@@ -341,6 +403,12 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.synth.SynthDriver()
         self.service.ensure_client.assert_not_called()
+
+    def test_mirrored_speech_keeps_newest_when_xp_falls_behind(self):
+        plugin = self.plugin.GlobalPlugin.__new__(self.plugin.GlobalPlugin)
+        plugin.onSpeech(["Busy server event"])
+        self.assertTrue(self.client.enqueue.call_args.kwargs["drop_oldest"])
+        self.client.cancel.assert_not_called()
 
     def test_missing_configured_mirror_voice_is_not_replaced(self):
         self.settings["mirrorVoice"] = "not-installed"

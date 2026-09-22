@@ -33,7 +33,9 @@ class BridgeClient:
         self._completed_utterances = 0
         self._enqueued_utterances = 0
         self._cancellations = 0
+        self._dropped_utterances = 0
         self._recovered_indexes = 0
+        self._voice_recoveries = 0
         self._last_diagnostic = 0
         self._waiting_ack = False
         self._ack_started = 0
@@ -110,7 +112,10 @@ class BridgeClient:
             # A torn-down UI must not kill the transport worker. No payload log.
             self.log.warning("Bridge callback unavailable: event=%s error_type=%s", event, type(error).__name__)
 
-    def enqueue(self, items):
+    def enqueue(self, items, drop_oldest=False):
+        """Queue one utterance. With drop_oldest, a full queue loses its oldest
+        waiting utterance instead of refusing, so mirrored speech stays current
+        when XP falls behind a busy stream of announcements."""
         items = tuple(items)
         characters = sum(len(item.text) for item in items if isinstance(item, Speech))
         if len(items) > 256 or characters > 16000:
@@ -119,7 +124,10 @@ class BridgeClient:
             if not self.connected or self._stop.is_set():
                 return False
             if len(self._queue) >= 64:
-                raise ValueError("Speech queue limit exceeded")
+                if not drop_oldest:
+                    raise ValueError("Speech queue limit exceeded")
+                self._queue.popleft()
+                self._dropped_utterances += 1
             self._queue.append(items)
             self._enqueued_utterances += 1
             self._pending_done = True
@@ -166,6 +174,15 @@ class BridgeClient:
     def _disconnect(self, reason):
         with self._lock:
             was_connected = self.connected
+            if was_connected and not self._stop.is_set():
+                slot, characters, quality, rate, volume = self._active_details if self._active else (-1, 0, 0, 0, 0)
+                elapsed = time.monotonic() - self._active[2] if self._active else 0
+                self.log.warning(
+                    "Failure snapshot: generation=%d request=%d queued=%d pending_indexes=%d "
+                    "active_seconds=%.2f voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
+                    self.generation, self._active[1] if self._active else 0,
+                    len(self._queue), len(self._pending_indexes), elapsed,
+                    slot, characters, quality, rate, volume)
             self.connected = False
             self._connected_event.clear()
             self.status = reason
@@ -265,6 +282,15 @@ class BridgeClient:
         elif command == "FORMAT" and len(fields) == 5 and fields[1] == self._session:
             rate, bits, channels = map(int, fields[2:])
             self.output_format = f"{rate} Hz, {bits}-bit, {channels} channel(s)"
+        elif command == "SAPIERROR" and len(fields) == 8 and fields[1] == self._session:
+            # Accept numeric metadata only, never arbitrary diagnostic strings.
+            if not all(value.isascii() and value.isdecimal() and len(value) <= 10 for value in fields[2:]):
+                return
+            generation, request, stage, result, slot, quality = map(int, fields[2:])
+            if not (1 <= stage <= 7 and result <= 0xFFFFFFFF and slot <= 128 and quality <= 48000):
+                return
+            self.log.warning("XP SAPI failure: generation=%d request=%d stage=%d HRESULT=0x%08X voice_slot=%d quality=%d",
+                             generation, request, stage, result, slot, quality)
         elif command == "ERROR" and len(fields) == 5 and fields[1] == self._session:
             # Fail safely to local speech rather than silently skip document text.
             # Only report known fixed codes: never log arbitrary guest payloads.
@@ -279,6 +305,13 @@ class BridgeClient:
                     current = self._active and (int(fields[2]), int(fields[3])) == self._active[:2]
                 if current:
                     self.log.info("XP completion confirmed by SAPI polling; recovering completion notification")
+            elif fields[4] == "voice-token-refreshed":
+                with self._lock:
+                    current = self._active and (int(fields[2]), int(fields[3])) == self._active[:2]
+                    if current:
+                        self._voice_recoveries += 1
+                if current:
+                    self.log.info("XP voice registration refreshed; rejected request resubmitted once")
         elif command in ("ACCEPTED", "CANCELLED") and len(fields) in (3, 4) and fields[1] == self._session:
             pass
         else:
@@ -367,15 +400,16 @@ class BridgeClient:
             pending_indexes = len(self._pending_indexes)
             paused, waiting_ack = self._paused, self._waiting_ack
             enqueued, cancellations = self._enqueued_utterances, self._cancellations
+            dropped = self._dropped_utterances
             voice_slot, characters, quality, rate, volume = self._active_details if self._active else (-1, 0, 0, 0, 0)
         # Counts and elapsed times only; never speech, voice tokens or paths.
         self.log.info(
             "Bridge progress: queued=%d frames=%d active_seconds=%.2f paused=%s "
             "waiting_ack=%s pending_indexes=%d completed=%d recovered_indexes=%d reply_age=%.2f "
-            "enqueued=%d cancellations=%d voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
+            "enqueued=%d cancellations=%d dropped=%d voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
             queued, frames, active_seconds, paused, waiting_ack, pending_indexes,
             self._completed_utterances, self._recovered_indexes, now - self._last_receive, enqueued, cancellations,
-            voice_slot, characters, quality, rate, volume)
+            dropped, voice_slot, characters, quality, rate, volume)
 
     def _session_loop(self, transport):
         with self._lock:

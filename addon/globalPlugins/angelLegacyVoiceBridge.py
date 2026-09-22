@@ -1,4 +1,5 @@
 """Accessible connection controls, optional mirroring, and a real off switch."""
+import config
 import globalPluginHandler
 import globalVars
 import gui
@@ -56,7 +57,8 @@ class BridgePanel(SettingsPanel):
         self.fallback.SetValue(values["fallback"])
         self.autoReturn = helper.addItem(wx.CheckBox(self, label="Automatically return to the bridge after &recovery"))
         self.autoReturn.SetValue(values["autoReturn"])
-        helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, return when the connection and previous voice recover. Manual synth changes and Disconnect cancel the pending return."))
+        self._autoReturn_value = values["autoReturn"]
+        helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, check the previous voice with a short phrase at volume zero and return only after it renders again. Some XP voices stay audible at volume zero, so the check phrase may be heard. Checks back off and stop after 15 minutes. Manual synth or profile changes and Disconnect cancel the pending return."))
         helper.addItem(wx.StaticText(self, label="Emergency: NVDA+Shift+F11 disables the bridge now and restores local speech if necessary. Voice discovery updates automatically after connection."))
         self.status = helper.addLabeledControl("Connection status:", wx.TextCtrl, style=wx.TE_READONLY)
         self.buttons = {}
@@ -103,6 +105,11 @@ class BridgePanel(SettingsPanel):
             # Apply. Otherwise leave the user's pending panel selection alone.
             self.quality.SetSelection(QUALITY_VALUES.index(saved_quality) if saved_quality in QUALITY_VALUES else 0)
             self._quality_value = saved_quality
+        saved_return = service.settings()["autoReturn"]
+        if saved_return != self._autoReturn_value:
+            # The toggle command can change this while the panel is open.
+            self.autoReturn.SetValue(saved_return)
+            self._autoReturn_value = saved_return
         # An emergency shortcut can disable the service while this panel is open.
         # Do not let a later Apply silently turn it back on from stale controls.
         if not service.settings()["active"]:
@@ -218,7 +225,7 @@ class BridgePanel(SettingsPanel):
         self.onRefresh(None)
 
     def onAbout(self, event):
-        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev1\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
+        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev2\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
 
     def isValid(self):
         name = self.pipe.GetValue().strip()
@@ -274,6 +281,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         extensions.speechCanceled.register(self.onCancel)
         extensions.post_speechPaused.register(self.onPause)
         synthDriverHandler.synthChanged.register(service.clear_recovery)
+        # A profile switch that keeps eSpeak does not fire synthChanged. A later
+        # return must not write the bridge into that other profile.
+        self.profileSwitch = getattr(config, "post_configProfileSwitch", None)
+        if self.profileSwitch is not None:
+            self.profileSwitch.register(service.clear_recovery)
         self.registered = True
         try:
             service.start_diagnostics()
@@ -323,7 +335,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             if voice is None:
                 return
         try:
-            client.enqueue(translate(speechSequence, voice, values["mirrorRate"], values["mirrorVolume"]))
+            # A busy server can announce faster than XP speaks: keep the newest.
+            client.enqueue(translate(speechSequence, voice, values["mirrorRate"], values["mirrorVolume"]),
+                           drop_oldest=True)
         except Exception:
             client.cancel()
             log.warning("Legacy Voice Bridge mirror request rejected; queued speech cleared")
@@ -335,6 +349,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def onPause(self, switch, **kwargs):
         if service.client and (self.mirroring() or not switch):
             service.client.pause(switch)
+
+    @script(description="Turn automatic return to the bridge after recovery on or off")
+    def script_toggleAutoReturn(self, gesture):
+        # No default gesture: assign one in NVDA's Input gestures if wanted.
+        values = service.settings()
+        values["autoReturn"] = not values["autoReturn"]
+        if values["autoReturn"]:
+            ui.message("Automatic return to the bridge on")
+        else:
+            service.clear_recovery()
+            ui.message("Automatic return to the bridge off")
 
     @script(description="Disable the bridge now and keep or restore local speech", gesture="kb:NVDA+shift+f11")
     def script_localSpeech(self, gesture):
@@ -352,6 +377,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             extensions.speechCanceled.unregister(self.onCancel)
             extensions.post_speechPaused.unregister(self.onPause)
             synthDriverHandler.synthChanged.unregister(service.clear_recovery)
+            if self.profileSwitch is not None:
+                self.profileSwitch.unregister(service.clear_recovery)
             if BridgePanel in NVDASettingsDialog.categoryClasses:
                 NVDASettingsDialog.categoryClasses.remove(BridgePanel)
         active = synthDriverHandler.getSynth()

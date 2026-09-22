@@ -67,6 +67,51 @@ def wait_until(condition, seconds=2):
 
 
 class ClientTests(unittest.TestCase):
+    def test_disconnect_records_counts_before_discarding_failed_request(self):
+        from unittest.mock import Mock
+        self.client.close()
+        self.client._stop.clear()
+        self.client.connected = True
+        self.client.log = Mock()
+        self.client._active = (2, 19, time.monotonic())
+        self.client._active_details = (4, 106, 48000, 16, 20)
+        self.client._pending_indexes = deque([7])
+        self.client._queue.append([Speech("Private sentinel never log this", 4)])
+        self.client._disconnect("sapi-engine-failed")
+        record = self.client.log.warning.call_args_list[0].args
+        self.assertIn("Failure snapshot", record[0])
+        self.assertEqual(record[2:5], (19, 1, 1))
+        self.assertEqual(record[6:], (4, 106, 48000, 16, 20))
+        self.assertNotIn("Private sentinel", repr(self.client.log.mock_calls))
+        self.assertFalse(self.client._queue)
+
+    def test_token_recovery_notice_does_not_finish_or_replay_speech(self):
+        from unittest.mock import Mock
+        self.client.close()
+        self.client.log = Mock()
+        self.events.clear()
+        self.client._active = (1, 2, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        self.client._process_line(["NOTICE", self.client._session, "1", "2", "voice-token-refreshed"])
+        self.assertEqual(self.client._voice_recoveries, 1)
+        self.assertEqual(list(self.client._pending_indexes), [7])
+        self.assertEqual(self.events, [])
+        self.client._process_line(["NOTICE", self.client._session, "0", "1", "voice-token-refreshed"])
+        self.assertEqual(self.client._voice_recoveries, 1)
+
+    def test_sapi_diagnostics_are_numeric_and_do_not_complete_speech(self):
+        from unittest.mock import Mock
+        self.client.close()
+        self.client.log = Mock()
+        self.events.clear()
+        self.client._process_line(["SAPIERROR", self.client._session, "1", "2", "1", "2147943410", "4", "48000"])
+        self.client.log.warning.assert_called_once()
+        self.assertEqual(self.events, [])
+        self.client.log.reset_mock()
+        for bad in ("private text", "9" * 200, "-1", "١"):
+            self.client._process_line(["SAPIERROR", self.client._session, "1", "2", "1", bad, "4", "48000"])
+        self.client.log.warning.assert_not_called()
+
     def test_progress_details_are_numeric_not_spoken_text(self):
         from unittest.mock import Mock
         self.client.close()
@@ -328,6 +373,19 @@ class ClientTests(unittest.TestCase):
         self.client._process_line(["ENDVOICES"])
         self.client._send_work(self.pipe)
         self.assertIn("BEGIN", [f[0] for f in self.pipe.sent])
+    def test_full_queue_refuses_unless_dropping_oldest(self):
+        self.client.connected = True
+        for number in range(64):
+            self.client.enqueue([Speech(f"Queued {number}")])
+        with self.assertRaises(ValueError):
+            self.client.enqueue([Speech("Refused")])
+        self.assertTrue(self.client.enqueue([Speech("Newest")], drop_oldest=True))
+        with self.client._lock:
+            texts = [items[0].text for items in self.client._queue]
+        self.assertEqual(len(texts), 64)
+        self.assertEqual((texts[0], texts[-1]), ("Queued 1", "Newest"))
+        self.assertEqual(self.client._dropped_utterances, 1)
+
     def test_close_rejects_new_speech(self):
         self.client.close(wait=False)
         self.assertFalse(self.client.enqueue([Speech("Do not speak")]))

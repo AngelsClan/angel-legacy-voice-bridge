@@ -114,8 +114,9 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             items = translate(speechSequence, index, self._rate, self._volume, self._pitch)
             if not self.client.enqueue(items):
                 self._lost_connection()
-        except Exception:
-            log.warning("Legacy Voice Bridge speech request could not be queued")
+        except Exception as error:
+            # Exception text may contain the utterance; record its type only.
+            service.diagnostics().warning("Speech admission failed: error_type=%s", type(error).__name__)
             self._lost_connection()
 
     def cancel(self):
@@ -142,16 +143,31 @@ class SynthDriver(synthDriverHandler.SynthDriver):
                 globalVars.settingsRing.updateSupportedSettings(self)
 
     def _lost_connection(self, only_if_disconnected=False):
-        synthDoneSpeaking.notify(synth=self)
-        if service.settings()["fallback"] and (not only_if_disconnected or not self.client.connected):
+        # DONE is not a replacement for missing indexes. Defer cancellation
+        # until speak() has returned, then reset NVDA's abandoned utterance.
+        if not getattr(self, "_failure_pending", False):
+            self._failure_pending = True
             queueHandler.queueFunction(queueHandler.eventQueue, self._fallback, only_if_disconnected)
 
     def _fallback(self, only_if_disconnected=False):
+        self._failure_pending = False
+        if self._dead or synthDriverHandler.getSynth() is not self:
+            return
+        import speech
+        pending, indexes, callbacks = service.speech_backlog_counts()
+        service.diagnostics().warning(
+            "Resetting failed bridge speech: pending_sequences=%d indexes=%d callbacks=%d reconnected=%s",
+            pending, indexes, callbacks, self.client.connected)
+        speech.cancelSpeech()
+        # Profile restoration during cancellation can select another synth.
+        if self._dead or synthDriverHandler.getSynth() is not self:
+            return
         if only_if_disconnected and self.client.connected:
             return
-        if not self._dead and synthDriverHandler.getSynth() is self:
+        if service.settings()["fallback"]:
             saved = {"voice": self._voice, "rate": self._rate, "volume": self._volume, "pitch": self._pitch}
             if synthDriverHandler.setSynth("espeak"):
+                service.diagnostics().info("Fallback to local eSpeak succeeded; abandoned speech queue cleared")
                 service.arm_recovery(self.client, synthDriverHandler.getSynth(), saved)
                 ui.message("Legacy bridge unavailable. Switched to local eSpeak.")
             else:

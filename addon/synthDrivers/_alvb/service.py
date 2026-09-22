@@ -49,14 +49,17 @@ def _diagnostic_tick(event, data):
     elif not sink.failed:
         diagnostic_failure_reported = False
     if now - last_backlog_sample >= 5:
+        import synthDriverHandler
         last_backlog_sample = now
         pending, indexes, callbacks = speech_backlog_counts()
-        counts = (pending, indexes, callbacks)
+        selected = synthDriverHandler.getSynth()
+        bridge_selected = getattr(selected, "name", None) == "angelLegacyVoiceBridge"
+        counts = (pending, indexes, callbacks, bridge_selected)
         if counts != last_backlog_counts or any(count > 0 for count in counts) or now - last_backlog_log >= 60:
             last_backlog_log = now
             last_backlog_counts = counts
-            sink.info("NVDA backlog: pending_sequences=%d indexes_active=%d callbacks=%d event_queue=%d dropped_diagnostics=%d",
-                      pending, indexes, callbacks, queueHandler.eventQueue.qsize(), sink.dropped)
+            sink.info("NVDA backlog: pending_sequences=%d indexes_active=%d callbacks=%d event_queue=%d dropped_diagnostics=%d bridge_selected=%s",
+                      pending, indexes, callbacks, queueHandler.eventQueue.qsize(), sink.dropped, bridge_selected)
     if client is not None:
         _deliver(client, "health", None)
 
@@ -103,6 +106,56 @@ def diagnostics():
     return diagnostic_log
 
 
+# Automatic return after an unexpected fallback. A connected pipe and a listed
+# voice token are not proof: a crashed engine host can leave both intact. Only
+# a completed silent render in the original voice, confirmed by its final
+# bookmark, allows the return. Every limit below keeps retries bounded.
+RETURN_LIMIT = 3
+RETURN_WINDOW = 600
+FIRST_PROBE_DELAY = 5
+MAX_PROBE_DELAY = 60
+MAX_PROBES = 12
+RECOVERY_WINDOW = 900
+PROBE_TIMEOUT = 15
+IDLE_WAIT = 8
+# Fixed synthetic text only; never user speech. Volume 0 makes the engine do
+# its full front-end and synthesis work while the adapter writes silent PCM.
+PROBE_TEXT = "Voice check, one two three."
+PROBE_INDEX = 2147483000
+
+
+class Recovery:
+    def __init__(self, source, fallback_synth, voice_settings, profile, now, delay):
+        self.source = source
+        self.fallback_synth = fallback_synth
+        self.voice_settings = voice_settings
+        self.fallback_voice = getattr(fallback_synth, "voice", None)
+        self.profile = profile
+        self.started = now
+        self.delay = delay
+        self.next_probe = now + delay
+        self.probes = 0
+        self.probe_generation = None
+        self.probe_started = 0
+        self.verified_at = None
+
+
+def _profile_identity():
+    """Names of the active configuration profile stack; None if unavailable."""
+    try:
+        return tuple(getattr(profile, "name", None) for profile in config.conf.profiles)
+    except Exception:
+        return None
+
+
+def _announce(text):
+    try:
+        import ui
+        ui.message(text)
+    except Exception:
+        log.warning("Legacy Voice Bridge announcement unavailable")
+
+
 def clear_recovery(**kwargs):
     """A deliberate synth/profile change or disable cancels pending return."""
     global recovery
@@ -114,31 +167,115 @@ def arm_recovery(source, fallback_synth, voice_settings):
     values = settings()
     if values["active"] and values["autoReturn"] and fallback_synth and fallback_synth.name == "espeak":
         now = time.monotonic()
-        while automatic_returns and now - automatic_returns[0] > 60:
+        while automatic_returns and now - automatic_returns[0] > RETURN_WINDOW:
             automatic_returns.popleft()
-        if len(automatic_returns) >= 3:
+        if len(automatic_returns) >= RETURN_LIMIT:
             log.warning("Legacy Voice Bridge automatic return paused after repeated failures; select it manually when ready")
+            diagnostics().warning("Automatic return paused: recent_returns=%d", len(automatic_returns))
+            _announce("Bridge failed repeatedly. Staying on eSpeak.")
             return
-        recovery = (source, fallback_synth, voice_settings, getattr(fallback_synth, "voice", None))
+        # Each recent failed return doubles the first wait: 5, 10, 20 seconds.
+        delay = FIRST_PROBE_DELAY * 2 ** len(automatic_returns)
+        recovery = Recovery(source, fallback_synth, voice_settings, _profile_identity(), now, delay)
+        diagnostics().info("Automatic return armed: first_check_seconds=%d", delay)
+
+
+def _abandon(reason, announce=True):
+    clear_recovery()
+    diagnostics().warning("Automatic return stopped: reason=%s", reason)
+    if announce:
+        _announce("Bridge voice did not recover. Staying on eSpeak.")
+
+
+def _probe_failed(state, reason):
+    state.probe_generation = None
+    state.verified_at = None
+    state.delay = min(MAX_PROBE_DELAY, state.delay * 2)
+    state.next_probe = time.monotonic() + state.delay
+    diagnostics().info("Recovery check failed: reason=%s checks=%d next_seconds=%d",
+                       reason, state.probes, state.delay)
+
+
+def recovery_event(source, event, data):
+    """Worker events for the pending check; stale sources/generations ignored."""
+    state = recovery
+    if state is None or state.source is not source or state.probe_generation is None:
+        return
+    if event == "index" and tuple(data) == (state.probe_generation, PROBE_INDEX):
+        state.probe_generation = None
+        state.verified_at = time.monotonic()
+        diagnostics().info("Recovery check rendered: checks=%d", state.probes)
+    elif event == "disconnected":
+        _probe_failed(state, "disconnected")
+
+
+def _start_probe(state, now):
+    source = state.source
+    voice = state.voice_settings
+    index = next((index for index, token in source.voice_tokens.items() if token == voice["voice"]), None)
+    if index is None:
+        return
+    from .protocol import Bookmark, Speech
+    state.probes += 1
+    state.probe_started = now
+    generation = source.generation
+    items = [Speech(PROBE_TEXT, index, max(0, min(20, round(voice["rate"] / 5))), 0,
+                    max(0, min(20, round(voice["pitch"] / 5)))), Bookmark(PROBE_INDEX)]
+    try:
+        accepted = source.enqueue(items)
+    except ValueError:
+        accepted = False
+    if accepted:
+        state.probe_generation = generation
+    else:
+        _probe_failed(state, "not-accepted")
 
 
 def try_recovery():
     import synthDriverHandler
-    global recovery
-    if recovery is None:
+    import speech
+    state = recovery
+    if state is None:
         return
-    source, fallback_synth, voice_settings, fallback_voice = recovery
     values = settings()
-    if (not values["active"] or not values["autoReturn"] or client is not source
-            or synthDriverHandler.getSynth() is not fallback_synth
-            or getattr(fallback_synth, "voice", None) != fallback_voice):
+    if (not values["active"] or not values["autoReturn"] or client is not state.source
+            or synthDriverHandler.getSynth() is not state.fallback_synth
+            or getattr(state.fallback_synth, "voice", None) != state.fallback_voice
+            or _profile_identity() != state.profile):
         clear_recovery()
         return
-    if not source.connected or voice_settings["voice"] not in source.voice_tokens.values():
+    now = time.monotonic()
+    source = state.source
+    if state.probe_generation is not None:
+        if source.generation != state.probe_generation:
+            _probe_failed(state, "interrupted")
+        elif now - state.probe_started > PROBE_TIMEOUT:
+            _probe_failed(state, "timeout")
         return
+    if state.verified_at is None:
+        if now - state.started > RECOVERY_WINDOW:
+            _abandon("window")
+        elif state.probes >= MAX_PROBES:
+            _abandon("checks")
+        elif (now >= state.next_probe and source.connected
+              and state.voice_settings["voice"] in source.voice_tokens.values()):
+            _start_probe(state, now)
+        return
+    # Verified. Prefer not to cut off eSpeak mid-sentence, but do not wait long.
+    pending, indexes, callbacks = speech_backlog_counts()
+    if (pending > 0 or indexes > 0) and now - state.verified_at < IDLE_WAIT:
+        return
+    if not source.connected or state.voice_settings["voice"] not in source.voice_tokens.values():
+        _probe_failed(state, "lost-after-check")
+        return
+    voice_settings, fallback_synth = state.voice_settings, state.fallback_synth
     # Consume before switching: failure must not cause an endless synth loop.
     clear_recovery()
-    automatic_returns.append(time.monotonic())
+    automatic_returns.append(now)
+    speech.cancelSpeech()
+    # Cancellation can restore a speech-triggered configuration profile.
+    if synthDriverHandler.getSynth() is not fallback_synth:
+        return
     if synthDriverHandler.setSynth("angelLegacyVoiceBridge"):
         restored = synthDriverHandler.getSynth()
         try:
@@ -147,8 +284,11 @@ def try_recovery():
                 setattr(restored, key, voice_settings[key])
             restored.saveSettings()
             log.info("Legacy Voice Bridge automatically restored after recovery")
+            diagnostics().info("Automatic return completed after verified render")
+            _announce("Bridge voice recovered.")
         except Exception:
             log.warning("Legacy Voice Bridge recovery settings failed; restoring local speech")
+            speech.cancelSpeech()
             synthDriverHandler.setSynth("espeak")
     else:
         log.warning("Legacy Voice Bridge recovery selection failed; keeping local speech")
@@ -175,6 +315,8 @@ def _deliver(source, event, data):
     global testing
     if event in ("done", "disconnected"):
         finish_test()
+    if event in ("index", "disconnected"):
+        recovery_event(source, event, data)
     for listener in tuple(listeners):
         try:
             listener(event, data)
@@ -253,6 +395,8 @@ def disable():
     stop()
     active = synthDriverHandler.getSynth()
     if active and active.name == "angelLegacyVoiceBridge":
+        import speech
+        speech.cancelSpeech()
         if not synthDriverHandler.setSynth("espeak"):
             log.error("Bridge stopped, but local eSpeak could not be restored")
             raise RuntimeError("Bridge stopped, but local eSpeak could not be restored")
