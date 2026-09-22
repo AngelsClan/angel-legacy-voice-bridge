@@ -36,6 +36,7 @@ diagnostic_log = None
 last_backlog_log = 0
 last_backlog_sample = 0
 monitor_stopped = None
+monitor_thread = None
 last_backlog_counts = None
 diagnostic_failure_reported = False
 
@@ -58,7 +59,12 @@ def _diagnostic_tick(event, data):
         selected = synthDriverHandler.getSynth()
         bridge_selected = getattr(selected, "name", None) == "angelLegacyVoiceBridge"
         counts = (pending, indexes, callbacks, bridge_selected)
-        if counts != last_backlog_counts or any(count > 0 for count in counts) or now - last_backlog_log >= 60:
+        # Only real backlog is "busy". Counting bridge_selected as a nonzero
+        # number logged every five seconds for as long as the bridge was the
+        # selected synthesizer, filling and rotating the log during exactly the
+        # sessions whose evidence matters most.
+        busy = pending > 0 or indexes > 0 or callbacks > 0
+        if counts != last_backlog_counts or busy or now - last_backlog_log >= 60:
             last_backlog_log = now
             last_backlog_counts = counts
             sink.info("NVDA backlog: pending_sequences=%d indexes_active=%d callbacks=%d event_queue=%d dropped_diagnostics=%d bridge_selected=%s",
@@ -68,10 +74,18 @@ def _diagnostic_tick(event, data):
 
 
 def start_diagnostics():
-    """Observe responsiveness without enabling the bridge or changing speech."""
-    global monitor_stopped
+    """Observe responsiveness without enabling the bridge or changing speech.
+
+    Returns a token identifying this monitor. Pass it back to stop_diagnostics
+    so that a retired plugin instance can only stop the monitor it started.
+    """
+    global monitor_stopped, monitor_thread
+    if monitor_stopped is not None and monitor_thread is not None and monitor_thread.is_alive():
+        return monitor_stopped
+    # A half-dead predecessor (its thread gone, its flag still set) would
+    # otherwise leave diagnostics silent for the rest of the session.
     if monitor_stopped is not None:
-        return
+        monitor_stopped.set()
     refresh_diagnostics_preference()
     monitor_stopped = threading.Event()
     stopped = monitor_stopped
@@ -80,18 +94,27 @@ def start_diagnostics():
         lambda event, data: _diagnostic_tick(event, data) if not stopped.is_set() else None,
         diagnostics())
     try:
-        dispatch.start_monitor(monitor_stopped)
+        monitor_thread = dispatch.start_monitor(monitor_stopped)
     except Exception:
         monitor_stopped.set()
         monitor_stopped = None
+        monitor_thread = None
         raise
+    return monitor_stopped
 
 
-def stop_diagnostics():
-    global monitor_stopped
-    if monitor_stopped is not None:
-        monitor_stopped.set()
-        monitor_stopped = None
+def stop_diagnostics(token=None):
+    global monitor_stopped, monitor_thread
+    if monitor_stopped is None:
+        return
+    if token is not None and token is not monitor_stopped:
+        # An earlier instance shutting down after its replacement started must
+        # not silence the live monitor.
+        token.set()
+        return
+    monitor_stopped.set()
+    monitor_stopped = None
+    monitor_thread = None
     # Keep the single writer until process exit: a plugin reload must not close
     # the logger still owned by an active synthesizer's transport worker.
 

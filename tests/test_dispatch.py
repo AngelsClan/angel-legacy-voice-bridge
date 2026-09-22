@@ -45,6 +45,40 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.deliver.call_count, 31)
         self.log.info.assert_called_once()
 
+    def test_lost_health_callback_is_rearmed_instead_of_silencing_the_monitor(self):
+        # NVDA discards its queue in some paths. A callback that never runs
+        # must not latch the heartbeat off for the rest of the session.
+        self.dispatch("health", None)
+        self.pending.clear()
+        self.now = 5
+        self.dispatch("health", None)
+        self.assertEqual(self.pending, [])
+        self.now = self.dispatch.rearm + 1
+        self.dispatch("health", None)
+        self.assertEqual(len(self.pending), 1)
+        self.flush()
+        self.deliver.assert_called_once_with("health", None)
+        self.now += 1
+        self.dispatch("health", None)
+        self.flush()
+        self.assertEqual(self.deliver.call_count, 2)
+
+    def test_rearm_is_reported_once_per_loss(self):
+        self.dispatch("health", None)
+        self.pending.clear()
+        self.now = self.dispatch.rearm + 1
+        self.dispatch("health", None)
+        rearmed = [call for call in self.log.warning.call_args_list
+                   if "rearmed" in call.args[0]]
+        self.assertEqual(len(rearmed), 1)
+        self.flush()
+        self.now += 1
+        self.dispatch("health", None)
+        self.flush()
+        rearmed = [call for call in self.log.warning.call_args_list
+                   if "rearmed" in call.args[0]]
+        self.assertEqual(len(rearmed), 1)
+
     def test_schedule_failure_allows_heartbeat_retry(self):
         self.dispatch.schedule = Mock(side_effect=RuntimeError("failure"))
         with self.assertRaises(RuntimeError):

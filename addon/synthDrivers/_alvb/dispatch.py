@@ -23,11 +23,14 @@ def main_thread_locations(thread_id):
 
 
 class MainThreadDispatch:
-    def __init__(self, schedule, deliver, logger, clock=time.monotonic):
+    def __init__(self, schedule, deliver, logger, clock=time.monotonic, rearm=30):
         self.schedule = schedule
         self.deliver = deliver
         self.log = logger
         self.clock = clock
+        # A queued callback that never runs must not silence the heartbeat for
+        # the rest of the session; past this many seconds it is presumed lost.
+        self.rearm = rearm
         self.main_thread = threading.main_thread().ident
         self._health_pending_since = None
         self._last_warning = float("-inf")
@@ -38,6 +41,7 @@ class MainThreadDispatch:
         thread = threading.Thread(target=self._monitor, args=(stopped,),
                                   name="LegacyBridgeMainMonitor", daemon=True)
         thread.start()
+        return thread
 
     def _monitor(self, stopped):
         while not stopped.wait(1):
@@ -57,9 +61,15 @@ class MainThreadDispatch:
                     self.log.warning(
                         "Bridge main-thread delivery delayed: seconds=%.2f locations=%s",
                         age, main_thread_locations(self.main_thread))
-                # A frozen main thread needs one heartbeat, not an ever-growing
-                # backlog of identical callbacks. Speech/index events are kept.
-                return
+                if age < self.rearm:
+                    # A frozen main thread needs one heartbeat, not an ever-growing
+                    # backlog of identical callbacks. Speech/index events are kept.
+                    return
+                # Past the limit the queued callback is presumed lost, not late:
+                # NVDA discards its queue in some paths, and a latched pending
+                # heartbeat would otherwise silence diagnostics and freeze
+                # detection for the rest of the session.
+                self.log.warning("Bridge heartbeat rearmed after no delivery: seconds=%.2f", age)
             self._health_pending_since = now
         try:
             self.schedule(self._deliver, event, data)

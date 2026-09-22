@@ -27,6 +27,20 @@
   first render) fixed in those packs, add troubleshooting for per-voice output
   format and start-up silence, and correct the claim that volume 0 mutes every
   voice.
+- Keep the diagnostics heartbeat alive. Observed in real use: diagnostics
+  stopped recording mid-session and never resumed, so nothing was captured
+  from the hours that mattered, and the main-thread freeze detector stopped
+  with it. Two causes are now closed. A queued heartbeat that never runs is
+  re-armed after 30 seconds instead of latching the monitor off for the rest
+  of the session, and the re-arm is recorded. And a plugin instance now holds
+  a token for the monitor it started, so a late shutdown cannot stop its own
+  replacement; a monitor whose thread has died is replaced rather than left
+  silent.
+- Stop the idle backlog record repeating every five seconds while the bridge
+  is the selected synthesizer. The selected-synth flag was being counted as a
+  nonzero backlog, which filled and rotated the diagnostics log during exactly
+  the sessions whose evidence matters most. Idle sampling is once a minute
+  again, as documented.
 - Documentation rewrite: README.md and the add-on's help are reorganised around
   a single ordered installation path (virtual serial port, XP helper, add-on,
   first test) with a worked VirtualBox example, verified console and status

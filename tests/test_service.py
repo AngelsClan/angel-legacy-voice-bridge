@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import threading
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -118,6 +119,42 @@ class ServiceTests(unittest.TestCase):
                     deliver("health", None)
                     tick.assert_not_called()
                     self.service.stop_diagnostics()
+
+    def test_retired_instance_cannot_stop_its_replacement(self):
+        # The observed failure: diagnostics went silent for hours while NVDA
+        # kept running. A late terminate must only stop its own monitor.
+        with patch.object(self.service.MainThreadDispatch, "start_monitor"):
+            live = self.service.start_diagnostics()
+            stale = threading.Event()
+            self.service.stop_diagnostics(stale)
+            self.assertIs(self.service.monitor_stopped, live)
+            self.assertFalse(live.is_set())
+            self.assertTrue(stale.is_set())
+            self.service.stop_diagnostics(live)
+            self.assertIsNone(self.service.monitor_stopped)
+
+    def test_dead_monitor_thread_is_replaced_rather_than_left_silent(self):
+        dead = Mock()
+        dead.is_alive.return_value = False
+        with patch.object(self.service.MainThreadDispatch, "start_monitor", return_value=dead) as start:
+            first = self.service.start_diagnostics()
+            second = self.service.start_diagnostics()
+        self.assertEqual(start.call_count, 2)
+        self.assertIsNot(first, second)
+        self.assertTrue(first.is_set())
+        self.service.stop_diagnostics()
+
+    def test_idle_bridge_synth_does_not_log_every_tick(self):
+        selected = Mock()
+        selected.name = "angelLegacyVoiceBridge"
+        self.handler.getSynth.return_value = selected
+        with patch.object(self.service, "speech_backlog_counts", return_value=(0, 0, 0)):
+            with patch.object(self.service.time, "monotonic") as clock:
+                for second in range(200, 260):
+                    clock.return_value = second
+                    self.service._diagnostic_tick("health", None)
+        # Once for the change to bridge_selected, once for the minute mark.
+        self.assertLessEqual(self.service.diagnostics.return_value.info.call_count, 2)
 
     def test_startup_callback_waits_for_nvda_queue_without_wx(self):
         source = self.service.ensure_client()

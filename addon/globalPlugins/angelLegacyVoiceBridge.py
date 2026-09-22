@@ -292,8 +292,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if self.profileSwitch is not None:
             self.profileSwitch.register(service.clear_recovery)
         self.registered = True
+        self.monitorToken = None
         try:
-            service.start_diagnostics()
+            # Keep the token: only the instance that started a monitor may stop
+            # it, so a late terminate cannot silence its own replacement.
+            self.monitorToken = service.start_diagnostics()
         except Exception as error:
             log.warning("Legacy Voice Bridge monitor unavailable: %s", type(error).__name__)
         try:
@@ -372,7 +375,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ui.message("Bridge disabled. Local speech only.")
 
     def terminate(self):
-        service.stop_diagnostics()
+        service.stop_diagnostics(getattr(self, "monitorToken", None))
         if getattr(self, "controlTimer", None):
             self.controlTimer.Stop()
         if getattr(self, "control", None):
