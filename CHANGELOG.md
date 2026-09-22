@@ -27,6 +27,20 @@
   first render) fixed in those packs, add troubleshooting for per-voice output
   format and start-up silence, and correct the claim that volume 0 mutes every
   voice.
+- Documentation rewrite: README.md and the add-on's help are reorganised around
+  a single ordered installation path (virtual serial port, XP helper, add-on,
+  first test) with a worked VirtualBox example, verified console and status
+  messages, symptom-led troubleshooting, and an invitation to contribute
+  support for other hypervisors and emulators. Every user-visible label,
+  announcement, default and timing was checked against the source: the settings
+  table had the fallback checkbox's name wrong ("Use local eSpeak if the bridge
+  synthesizer disconnects" instead of "Restore local eSpeak if bridge speech
+  disconnects"), the output-format choices did not match the shipped labels,
+  and the per-probe 15-second timeout, the 25-second backoff after an
+  incomplete voice scan, the scan timeout that pauses scanning until reconnect,
+  and the behaviour above 128 voices were undocumented. RELEASE-NOTES.md is
+  rewritten around the current build with the older notes kept as history.
+  No code, version or behaviour change.
 - Output format labels now say that fixed rates are converted by XP and can
   sound harsher, and recommend Voice default. Measured on XP, converting the
   22.05 kHz Mac voices to 44.1 or 48 kHz adds false high frequencies only

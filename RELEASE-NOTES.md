@@ -1,74 +1,106 @@
-# Angel Legacy Voice Bridge — release hold
+# Release notes
 
-0.1.2-dev2 is a diagnostic development candidate, not a cleared release.
-An accessibility-critical NVDA freeze reported against 0.1.1 remains unresolved.
-Keep local speech selected and bridge operation disabled. See TEST-REPORT.md
-for verified fixes, isolated tests and their limits. No user reproduction is
-required or requested. New logs are bounded and exclude spoken content.
+## Current: 0.1.2-dev2 — development build, release on hold
 
-This candidate improves skipped-text completion recovery and engine-error
-reporting. Replace the XP helper while it is stopped, then install the new
-add-on and restart NVDA only at a safe time. Neither the build nor the helper
-restarts NVDA. Preserve local speech and existing settings. The development
-package is `AngelLegacyVoiceBridge-0.1.2-dev2.nvda-addon`.
+**This is not a cleared public release.** An accessibility-critical NVDA freeze
+reported against 0.1.1 is still unexplained. Keep a dependable local
+synthesizer selected and leave the bridge disabled unless you are deliberately
+testing it. Nobody is asked to reproduce the freeze. See
+[TEST-REPORT.md](TEST-REPORT.md) for what has actually been verified and what
+has not.
+
+### What changed since 0.1.1
+
+- **Speech no longer stalls after a failed voice.** Falling back to eSpeak used
+  to leave NVDA waiting for bookmarks from the voice that had already died. The
+  abandoned queue is now cleared first, so local speech continues. Old
+  announcements are discarded rather than replayed or falsely marked as spoken.
+  The same reset applies when automatic return fires and when you disable an
+  active bridge.
+- **Automatic return now requires proof.** A reconnected pipe or a voice that
+  still appears in the list is no longer accepted as recovery; a short fixed
+  check phrase must actually render, confirmed by its final bookmark. Checks
+  back off from 5 to 60 seconds and stop after 12 attempts or 15 minutes, with
+  spoken notices either way, and returns are limited to three in ten minutes.
+  It stays off by default, and there is now an optional command to turn it on
+  or off (no key assigned until you choose one).
+- **Voices that are reinstalled while selected recover.** The helper resolves
+  voice registrations afresh when switching and recovers once from SAPI's
+  "registry key marked for deletion" error, which previously forced a fallback
+  to eSpeak even though the voice was listed.
+- **Skipped text no longer hangs an utterance.** The helper checks real SAPI
+  completion without blocking, in addition to listening for completion events,
+  and preserves bookmarks before reporting completion. Asynchronous engine
+  errors are reported as failures instead of as successful silent speech.
+- **Mirroring survives heavy announcement traffic.** When XP falls 64
+  utterances behind, the oldest waiting mirrored utterance is dropped instead
+  of cancelling all mirrored speech.
+- **Output quality guidance.** Fixed sample rates make XP convert the voice's
+  own output; measured on XP that added false high frequencies only 21 to 27 dB
+  below the 22.05 kHz Mac voices. The format labels now say so and recommend
+  Voice default.
+- **Diagnostics can be turned off.** A new setting, "Write text-free
+  diagnostics log", applies immediately after OK or Apply without restarting
+  NVDA. It is on by default while the release is on hold. It never records
+  speech text, window titles or credentials.
+- **Text-free failure shapes.** When a voice fails, the log records counts of
+  character classes and words in the failed utterance, never the words. This is
+  what identified a text-encoding fault in a third-party Mac voice pack, which
+  was fixed in that pack rather than in the bridge.
+
+### Installing this build
+
+Replace **both** parts, and pick your own safe moment:
+
+1. In NVDA, switch to a local synthesizer and press Disconnect.
+2. In XP, close the helper with Control+C, replace
+   `AngelLegacyVoiceBridge.exe`, and start it again. XP does not need a reboot.
+3. Install `AngelLegacyVoiceBridge-0.1.2-dev2.nvda-addon` and restart NVDA when
+   it is safe. Nothing restarts NVDA for you, and your settings are kept.
+
+Follow [README.md](README.md) for first-time setup and [OPERATIONS.md](OPERATIONS.md)
+for maintenance. SHA-256 sidecar files are supplied for every artifact; the
+binaries are not signed.
 
 Passing synthetic and deliberately faulted tests is not confirmation that the
-reported intermittent Microsoft Sam silence or unsupported-text pause is cured.
+reported freeze, the intermittent Microsoft Sam silence or the unsupported-text
+pause is cured.
 
-## Historical 0.1.1 beta notes (superseded by the hold above)
+## Historical: 0.1.1 beta (superseded by the hold above)
 
-## Queue responsiveness fix
+An add-on-only update that recovered missing trailing bookmarks after XP
+confirmed an utterance had finished, since NVDA relies on those bookmarks to
+advance queued speech. Duplicate and cancelled bookmarks were not replayed, and
+preparing long speech no longer held the lock that cancel, pause and enqueue
+need. Text-free progress diagnostics were added.
 
-This add-on-only update recovers missing trailing bookmarks after XP confirms
-the current utterance has finished. NVDA uses indexes to advance queued speech;
-reporting completion alone is insufficient. Duplicate and canceled indexes are
-not replayed. Long speech packet preparation no longer holds the state lock
-needed by cancel, pause and enqueue. Added text-free progress diagnostics.
+The reported full-computer freeze was not reproduced in live testing at that
+time. Logs showed NVDA freezing during a dense event stream without identifying
+the blocking call.
 
-The reported full-computer freeze was not reproduced in live tests. Logs showed
-NVDA freezes during a dense event stream, but did not identify the blocking
-call. This release fixes demonstrated failure cases; user listening validation
-under the original workload is still needed.
+## Historical: 0.1.0 beta
 
-Use licensed SAPI5 voices installed in an offline 32-bit Windows XP VM with
-modern NVDA. Audio plays through XP. Voices and Windows are not included.
+The first public pre-release: the bridge synthesizer and optional mirrored
+speech, a state-aware Connect / Cancel connection / Disconnect control, live
+voice discovery, cancellation, pause, output formats in the settings ring,
+local eSpeak fallback with optional automatic return, an optional XP playback
+mixer adjustment, a local disable-only maintenance tool and the NVDA+Shift+F11
+emergency shortcut.
 
-## Download and install
+## Standing limitations
 
-- On modern Windows: open `AngelLegacyVoiceBridge-0.1.1.nvda-addon`, accept
-  replacement/installation, and restart NVDA when convenient.
-- Inside XP: put `AngelLegacyVoiceBridge.exe` in a folder such as
-  `C:\AngelLegacyVoiceBridge` and run it after configuring the VirtualBox serial
-  pipe. Existing public 0.1.0 helpers are unchanged and can stay running; no XP
-  reboot or helper update is required for this fix.
-- `AngelLegacyVoiceBridge-0.1.1-source.zip` includes the Python and C++ source,
-  build script, tests and full setup/operations documentation.
-- SHA-256 sidecars are supplied for each artifact. The binaries are not signed.
+These apply to every build so far:
 
-Follow README.md for setup and OPERATIONS.md for Guest Additions launch and
-maintenance. No passwords, personal VM identifiers or saved NVDA settings are
-included. Existing settings on your computer are retained when replacing the
-add-on.
+- Licensed SAPI 5 engines only. No SAPI 4, no network transport, no system-wide
+  SAPI 5 registration and no Windows service.
+- VirtualBox is the only platform tested. VMware, QEMU, Hyper-V and others are
+  unqualified; contributions are welcome, and README.md explains what a port
+  should demonstrate.
+- Separate XP SP1, SP2 and SP3 qualification, headless audio and broad hardware
+  testing are all still outstanding.
+- Audible quality, pronunciation and real perceived responsiveness remain user
+  checks. A completed transport test does not prove anything was heard.
+- This is a pre-release, not an NVDA Add-on Store submission and not a
+  qualified primary screen reader. Keep local speech available.
 
-## Included
-
-- Bridge synthesizer and optional mirrored speech.
-- State-aware Connect / Cancel connection / Disconnect control.
-- Live voice discovery, cancellation, pause and settings-ring output formats.
-- Local eSpeak fallback and optional automatic return that respects manual choices.
-- Optional XP playback mixer adjustment, off by default; affects other XP sounds.
-- Local disable-only maintenance tool and NVDA+Shift+F11 emergency shortcut.
-
-91 automated unit/contract tests and the hidden real-widget check pass. Live XP
-tests cover all installed test voices, supported output formats, protocol faults,
-cancellation/reconnection, live voice registration changes, and playback mixer
-readback. See TEST-REPORT.md for precise evidence and limitations.
-
-This is a **pre-release**, not an NVDA Add-on Store submission or a universally
-qualified primary screen reader. Keep local speech available. VirtualBox is the
-only currently supported hypervisor; VMware is not qualified. The offline XP
-helper passed muted headless backlog and format tests; audible quality remains
-a user check. Complete interactive NVDA acceptance and broader hardware testing
-remain. Licensed SAPI5 engines only; no SAPI4, network listener or Windows service.
-
-License: GNU GPL version 2 or later, matching Angel Audio Keeper.
+License: GNU GPL version 2 or later.

@@ -1,556 +1,692 @@
 # Angel Legacy Voice Bridge
 
-Development 0.1.2-dev2 — an offline bridge from current Windows NVDA to licensed
-SAPI 5 voices installed in a 32-bit Windows XP virtual machine.
+Use old SAPI 5 voices that only work on 32-bit Windows XP as if they were
+installed in your modern NVDA.
 
-**Release hold:** a serious NVDA freeze has been reported with 0.1.1. The exact
-cause remains unconfirmed. Do not rely on the bridge for primary speech or try
-to reproduce the problem if losing speech would leave you without assistance.
-Keep a dependable local synthesizer selected and the bridge disabled. Development
-diagnostics are not a claim that this accessibility-critical problem is fixed.
+You keep a Windows XP virtual machine on your own computer, with your licensed
+voices installed inside it. This project sends NVDA's text into that virtual
+machine, the voice speaks there, and you hear it through the virtual machine's
+sound output. For example, you can select AT&T Natural Voices Mike in NVDA on
+Windows 11 while Mike is really running in XP.
 
-[Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
+Everything stays on your computer. XP needs no internet connection, no network
+adapter, and no copy of NVDA inside it. **No voices are included** with this
+project; you supply your own licensed voices.
 
 This project was made with the help of AI.
+[Report a problem or ask a question](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues).
 
-For example, select AT&T Natural Voices Mike in modern NVDA while Mike actually
-runs in XP. The VM's speakers play the speech. XP does not need NVDA, an internet
-connection, a network adapter, or a microphone. Voices are not included.
+## Current status: please read before installing
 
-This is an NVDA add-on plus a small XP console program, not a Windows service or
-a system-wide SAPI voice. Start with mirroring/local speech available. It is a
-first beta, not yet a replacement for a dependable primary screen reader.
+**This is a development build (0.1.2-dev2) and the public release is on hold.**
 
-## What is included
+A serious NVDA freeze was reported against version 0.1.1 and the exact cause is
+still unconfirmed. Several real defects have been found and fixed since, but
+none of them has been proven to be *the* cause.
 
-### Speech recovery after an engine failure
+So, for now:
 
-The September 22 candidate fixes a confirmed fallback defect: changing to eSpeak
-alone left NVDA waiting for indexes from the failed voice. The add-on now cancels
-the abandoned speech queue before switching. Pending old announcements are
-discarded, not replayed or falsely marked spoken. New local speech can proceed.
-The same reset applies to automatic return and disabling the active bridge.
+- Keep a dependable local synthesizer, such as eSpeak NG or a OneCore voice,
+  selected as your normal NVDA speech.
+- Leave the bridge disabled unless you are deliberately testing it.
+- Do not try to reproduce a freeze if losing speech would leave you stranded.
 
-This fix requires the updated **add-on**. The already updated XP helper does not
-need replacing again. Install only at a safe restart time; development tools must
-not restart the user's active NVDA. Failure records include numeric request,
-length, queue, voice-slot and HRESULT data, never utterance text. Backlog records
-also distinguish bridge-selected from local-synth speech.
+Fixes and diagnostics in this build are not a promise that the problem is gone.
+When the hold is lifted, this section will say so.
 
-A separate asynchronous Pipe Organ engine error was traced to the Mac voice
-pack used in testing, not to the bridge: that pack's SAPI adapter sent text to
-Apple's engine as UTF-8 while the engine reads MacRoman, so non-English letters
-arrived as garbage. The voice pack now encodes MacRoman; whether this ends the
-crashes is being confirmed in normal use. The bridge's text-free "Failure text
-shape" record is what exposed the pattern. This does not lift the release hold.
-Keep dependable local speech available.
+## Contents
 
-### Switching voices after an installation
+- [How it works](#how-it-works)
+- [What you need](#what-you-need)
+- [Installation](#installation)
+  - [Step 1: Add a virtual serial port to the VM](#step-1-add-a-virtual-serial-port-to-the-vm)
+  - [Step 2: Put the helper program in XP and run it](#step-2-put-the-helper-program-in-xp-and-run-it)
+  - [Step 3: Install the NVDA add-on](#step-3-install-the-nvda-add-on)
+  - [Step 4: Connect and hear your first test](#step-4-connect-and-hear-your-first-test)
+  - [Step 5: Choose how you want to use the voices](#step-5-choose-how-you-want-to-use-the-voices)
+- [Everyday use](#everyday-use)
+- [Every setting explained](#every-setting-explained)
+- [What happens when the voice fails](#what-happens-when-the-voice-fails)
+- [Troubleshooting](#troubleshooting)
+- [Removing it](#removing-it)
+- [Other virtual machines and emulators: contributions welcome](#other-virtual-machines-and-emulators-contributions-welcome)
+- [Known limits](#known-limits)
+- [Privacy and security](#privacy-and-security)
+- [Building from source](#building-from-source)
+- [License and references](#license-and-references)
 
-The updated XP helper resolves voice registrations afresh when switching voices.
-It also recovers once from SAPI's specific "registry key marked for deletion"
-error when an installer replaces the voice already selected. This error could
-previously force a fallback to eSpeak even though the voice appeared in the list.
-Other failures still fall back to local speech; accepted speech is never replayed.
-This repair is in the XP helper and works with the existing protocol-2 add-on.
-Stop only the helper, replace its executable and start it again; no XP reboot or
-active NVDA restart is needed for this repair. The optional updated add-on adds
-more detailed error logging and should be installed only at a safe restart time.
+## How it works
 
-The helper keeps a bounded, approximately 1 MiB `bridge-sapi-errors.log` next to
-its executable, containing numeric error codes, operation stages and voice slots,
-not spoken text. A logged registry error may have been recovered successfully;
-consult the final request result rather than treating every record as a crash.
-This targeted repair does not resolve or lift the separate freeze investigation.
+There are two programs, one on each side:
 
-### Skipped text and voice-engine recovery
-
-This development update requires replacing the XP helper as well as the add-on
-to obtain all improvements. The helper now checks actual SAPI completion without
-blocking, in addition to listening for completion events. It preserves bookmarks
-before reporting completion, including when a voice skips unsupported text.
-Asynchronous engine errors trigger the existing connection-failure/local-speech
-handling instead of being reported as successful silent speech. Keep automatic
-local fallback enabled. No timer guesses when a slow voice should have finished.
-
-An English-only voice still cannot pronounce every language or emoji. The bridge
-does not delete non-English text; voices that support it must still receive it.
-Microsoft Sam and installed third-party voices passed the documented protocol
-tests, but the reported intermittent silence was not reproduced. These changes
-do not lift the release hold above. Volume zero is not reliable mute for every
-legacy voice; use Disconnect or Disable bridge now to stop bridge speech.
-
-### Development diagnostics and privacy
-
-The development add-on writes `angelLegacyVoiceBridge-diagnostics.log` in the
-NVDA user-configuration directory. The logger runs even when bridge speech is
-disabled, so local-speech operation can be compared without connecting to XP.
-It records lifecycle events, numeric backlog/progress counters, and code
-locations when NVDA's main thread fails to process a heartbeat for three seconds.
-When bridge speech fails, a "Failure text shape" record adds counts describing
-the failed utterance: digits, letters, spaces, ASCII punctuation, non-ASCII
-characters, `[[` and `]]` pairs, words and the longest word's length. These
-counts help find which kinds of text make a legacy engine fail; the words and
-characters themselves are never recorded.
-It does **not** record speech text, window titles, document contents, frame locals,
-passwords, or full source paths. Heartbeats are coalesced; repeated stall reports
-are limited to one every fifteen seconds.
-Code locations can include module/function names of other installed add-ons.
-Logging is controlled by **Write text-free diagnostics log** in the Legacy
-Voice Bridge settings. It is on by default while the release is on hold.
-Turning it off stops writing immediately after OK or Apply, without a restart;
-if it is off from the start, no log file is created. Existing log files are not
-deleted automatically.
-
-Disk writes happen on a separate daemon thread with a bounded 512-record queue.
-A slow disk drops diagnostic records instead of blocking speech. Idle backlog
-samples are reduced to once a minute. Transient write/rotation failures retry
-on later records and NVDA's normal log warns that evidence may be incomplete.
-The current log
-and two rotated copies use approximately 3 MiB total. This works with packaged
-NVDA, which does not include Python's `logging.handlers` module. No log uploads
-are automatic. A native call holding Python's GIL, abrupt process termination,
-or an unwritable disk can still prevent evidence from being recorded; this is
-not a guaranteed crash recorder or an automatic recovery mechanism. Fallback and
-emergency keyboard commands also cannot be guaranteed while NVDA itself is hung.
-
-Installing an updated add-on requires an NVDA restart at a safe time. Merely
-building this source does not update or restart an already running NVDA instance.
-
-- A selectable NVDA synthesizer with voice, rate, volume and pitch settings.
-- Optional mirroring: keep your regular NVDA voice and hear XP too.
-- Accessible NVDA settings for connection, voice discovery and a speech test.
-- A state-aware Connect/Disconnect button that stops speech and retries.
-- An optional XP playback-mixer adjustment and local disable-only maintenance tool.
-- Automatic voice-list updates, running-pipe discovery and XP output formats.
-- Automatic connection retries, cancellation, pause/resume and completion/index
-  notifications. Old speech is discarded on disconnect rather than replayed.
-- Local eSpeak fallback, optional automatic return after recovery, and an
-  emergency **NVDA+Shift+F11** shortcut.
-- An XP helper that lists the installed SAPI 5 voices and speaks through XP's
-  default audio device. Close it with Control+C. No driver installation in XP.
-- Readable source, build script, unit tests and opt-in live integration tests.
-
-## Requirements and tested compatibility
-
-- A current Windows NVDA host. This package targets NVDA 2026.1 and later, with
-  compatibility declared through 2026.2. The UI/user listening test is still
-  required; see [TEST-REPORT.md](TEST-REPORT.md) for the precise qualification.
-- A working XP **32-bit** VM and installed/licensed **SAPI 5** voices. SAPI 4-only
-  engines are not supported. No AT&T voice data or license is redistributed.
-- A virtual serial port connected to a **local Windows named pipe**. The host
-  is the pipe client; the hypervisor is the pipe server. Only one bridge client
-  can use a pipe at a time.
-- Working VM sound. Choose the host/VM audio output you want; NVDA's own output
-  device selector does not route XP's audio.
-
-The helper has run on a test XP 5.1.2600 VM with VirtualBox 7.2.18, Microsoft
-Sam, AT&T DTNV 1.4 Mike16 and Crystal16. The exact XP service pack was not
-confirmed. Although the helper avoids a modern C runtime and targets XP APIs,
-**SP1, SP2 and SP3 have not each been separately qualified**. VirtualBox is the
-only currently supported hypervisor. VMware is an experimental porting target,
-not a tested/supported platform; contributors are welcome to qualify it.
-
-## Installation: two separate folders
-
-The build produces:
-
-1. `dist/XP Bridge/AngelLegacyVoiceBridge.exe` — copy this into XP.
-2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.2-dev2.nvda-addon` — diagnostic
-   candidate for isolated testing, **not** a cleared primary-speech update.
-3. `dist/AngelLegacyVoiceBridge-0.1.2-dev2-source.zip` — readable Python and native
-   helper C++ source, build script, tests and documentation. No VM or voices.
-
-Historical GitHub Releases provide the `.nvda-addon`, standalone XP `.exe` and
-curated source ZIP. The release hold above supersedes those installation notes.
-This diagnostic candidate is not a new public release.
-
-Nothing is installed automatically by the build. Guest Additions/VMware Tools
-can help copy the helper, but the speech connection does not depend on them.
-An ISO attached to the VM is another offline way to transfer the helper.
-
-### Update safety
-
-Keep the bridge disabled while the speech-loss incident is investigated. If a
-diagnostic build is installed at an agreed safe time, saved settings are retained;
-select a reliable local synthesizer and keep bridge startup/mirroring off first.
-The XP helper and protocol remain unchanged. Building or copying this source
-does not update an active NVDA process, and logging is not an automatic cure.
-
-### VirtualBox configuration
-
-Save your work and shut down XP normally before changing virtual hardware.
-Do not modify a saved-state VM. In VirtualBox Manager, select the VM and open
-Settings, Serial Ports. Enable port 1 with:
-
-- Port number: COM1 (I/O address 0x3F8, IRQ 4).
-- Port mode: Host Pipe.
-- Path/address: `\\.\pipe\AngelLegacySpeech-XP`.
-- Do **not** select Connect to existing pipe: VirtualBox must create the pipe.
-
-This generic default is not tied to a particular computer. You can choose a
-different name beginning `\\.\pipe\AngelLegacySpeech-`; use the exact same name
-in the add-on. A unique suffix is useful with multiple VMs. With the default
-configured, the add-on automatically selects a single matching running pipe.
-With multiple matches, use **Detect running VM pipes** and choose the VM.
-Detection finds a configured pipe, not an unconfigured VM or an installed voice.
-VM names and installation folders in examples are placeholders, not saved
-machine configuration. The installer does not contain test credentials or a VM
-identifier. An upgrade retains your existing NVDA profile settings on your own
-computer; those settings are not part of the distributable package.
-
-For administrators who prefer commands, with the VM powered off:
-
-```powershell
-& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' modifyvm 'Windows XP' --uart1 0x3F8 4 --uart-mode1 server '\\.\pipe\AngelLegacySpeech-XP' --uart-type1 16550A
+```
+Your Windows computer                 Windows XP virtual machine
+---------------------                 --------------------------
+NVDA
+  + Angel Legacy Voice Bridge  ---->  AngelLegacyVoiceBridge.exe
+    (NVDA add-on)                       (small console program)
+                                              |
+       a local named pipe,                    v
+       pretending to be a                   SAPI 5 voice
+       serial cable                           |
+                                              v
+                                       XP's sound output  ))) you hear this
 ```
 
-Do not enable networking for this bridge. Start XP normally with its visible
-window. Confirm XP's normal audio works. Inside XP, put the helper in a folder
-such as `C:\AngelLegacyVoiceBridge`, then run `AngelLegacyVoiceBridge.exe`.
-COM1 is the default. Advanced setups can use `--com2`, `--com3` or `--com4`.
-Leave the console open; Alt+Tab away when desired. Running a second copy will
-fail because the COM port is already in use.
+The add-on sends text, not audio. It travels over a virtual serial port that
+your virtualization software presents to the host as a Windows named pipe. The
+helper inside XP hands that text to the SAPI 5 voice, and the voice plays
+through the virtual machine's own sound card. Nothing is sent over a network,
+and the add-on never has to know a password for XP.
 
-### VMware Workstation porting notes (experimental, unsupported)
+This means one thing worth remembering: **a successful connection does not
+prove you will hear anything.** The connection carries text. The sound comes
+from XP's audio, so XP's volume, its sound device and your virtual machine's
+audio settings all still matter.
 
-With the VM powered off, add a Serial Port. Choose a named pipe, use the same
-local pipe path as the add-on, and configure **this end as the server** and
-**the other end as an application**. Connect the device at power on. Match the
-guest COM number to the helper argument. Enable “Yield CPU on poll” if your
-Workstation version offers it. VMware UI names vary by version; check its
-serial-port documentation. Keep guest networking disabled. Do not use a remote
-pipe, network redirector, or expose this unencrypted protocol to a network.
-These are starting points for contributors, not a qualified installation recipe.
-Qualification must cover audio, voice discovery, cancellation, disconnect/recovery
-and supported guest versions. No VMware-specific dependency is required by the
-protocol itself.
+## What you need
 
-### Install and test the NVDA add-on
+- **A current Windows computer running NVDA.** This add-on is built for
+  NVDA 2026.1 and later, and is declared compatible through NVDA 2026.2.
+- **A 32-bit Windows XP virtual machine** that already works, with sound.
+  It does not need networking, and it should not have it.
+- **Your own licensed SAPI 5 voices installed inside XP.** SAPI 4-only voices
+  are not supported. No voice data or license is distributed with this project.
+- **VirtualBox.** VirtualBox is the only platform tested so far. See
+  [Other virtual machines and emulators](#other-virtual-machines-and-emulators-contributions-welcome)
+  if you would like to help change that.
+- **A free COM port in XP** (COM1 is used by default) for the virtual serial
+  connection described below.
 
-1. Keep a working local synthesizer selected. Open the `.nvda-addon` file on the
-   host and approve NVDA's installation prompt. Restart **NVDA when you are
-   ready**; the installer/build does not restart it for you.
-2. Open NVDA menu, Preferences, Settings, **Legacy Voice Bridge**.
-3. Confirm or detect the pipe. With XP and the helper running, check **Enable
-   bridge now** or activate **Connect**. The voice list updates
-   automatically; no additional Refresh click is required.
-4. Choose Mike, Crystal or another installed voice under **Mirror/test voice**.
-   Use **Test speech through XP**. You should hear one short sentence from XP.
-5. For two voices, enable **Mirror local NVDA speech to XP**, then Apply/OK.
-   Do not select NVDA's No speech synthesizer for normal mirroring; it is designed
-   to accompany a working local voice, not be your only speech path.
-6. For XP-only NVDA speech, open Select Synthesizer with **NVDA+Control+S** and
-   choose **Angel Legacy Voice Bridge (audio through XP)**. Open NVDA speech
-   settings to select the voice, rate, pitch and volume. Mirroring is suppressed
-   automatically while the bridge itself is the selected synthesizer.
-7. Save NVDA configuration (NVDA+Control+C, or NVDA's normal save-on-exit option)
-   if you want these settings remembered.
+Tested here: Windows XP 5.1.2600 under VirtualBox 7.2.18, with Microsoft Sam,
+AT&T DTNV 1.4 Mike16 and Crystal16, and 26 Panthera Classic Mac and Alex voices.
+The exact XP service pack was not recorded, and SP1, SP2 and SP3 have not each
+been separately qualified.
 
-### Change output format from the synthesizer settings ring
+## Installation
 
-With Angel Legacy Voice Bridge selected as the synthesizer, use
-**NVDA+Control+Left/Right Arrow** until you hear **XP output format**, then
-**NVDA+Control+Up/Down Arrow** to change it. It is also in NVDA's ordinary Speech
-settings. The choices match Legacy Voice Bridge settings: voice default or
-16/22.05/44.1/48 kHz, 16-bit mono. The next dispatched utterance uses the change;
-audio already playing is not reformatted mid-word. No helper restart or
-reconnection. Save NVDA configuration to retain the choice. The ring uses the
-same saved bridge setting, not a separate competing setting. With a local synth
-and mirroring, use the Legacy Voice Bridge panel instead of that synth's ring.
+You install two things in two different places, plus one virtual hardware
+change. Take them in order; each step ends with something you can check.
 
-To stop all bridge use, press **NVDA+Shift+F11**, uncheck **Enable bridge now**,
-or press **Disconnect** (or **Cancel connection** during retries). These cancel speech, stop the worker/retries,
-and turn off mirroring and automatic startup. Your existing local synthesizer
-is kept; eSpeak is selected only if the bridge was your active synthesizer.
-You can reassign the shortcut through NVDA's Input
-Gestures dialog. The usual NVDA+Control+S synthesizer dialog remains available.
+The release page provides:
 
-## Settings explained
-
-| Setting/action | Meaning |
+| File | Where it goes |
 | --- | --- |
-| Enable bridge now | Master switch for current bridge use. Checking connects and discovers voices. Unchecking disables speech, mirroring and retries immediately. Off by default. |
-| Connect automatically when NVDA starts | Connect at the next NVDA start when the master switch is enabled. Does not boot XP or launch its helper. Turning this off alone does not stop current speech. Saved mirror mode or selecting the bridge synth also needs a connection. |
-| Local bridge pipe | The exact pipe created by VirtualBox/VMware. Switch to a local synth before changing it. No IP address or guest password needed. |
-| Detect running VM pipes | Find matching local pipes; choose if several exist. Does not boot, change, or inspect the disks of a VM. |
-| Mirror local NVDA speech to XP | Send speech to XP as well as your active local synth. Turning off cancels mirrored speech immediately. Two voices can overlap and differ in timing. Off by default. |
-| Mirror/test voice | A voice discovered from XP; stored using its SAPI token ID, not its changing list position. |
-| Mirror/test rate | 0–100, mapped to SAPI's -10 to +10 rate. 50 is SAPI normal. Voice engines interpret speed differently. |
-| Mirror/test volume | 0–100. 0 silences most voices, but some engines (for example AT&T Natural Voices) stay audible at volume zero, in plain XP too. Independent of Windows/VM mixer volume. |
-| Set XP playback mixer to 100% when adjusting bridge volume | Optional, off by default. On connection, Apply/Test, or a bridge synth volume adjustment, request XP's preferred output's master and Wave playback levels at 100%. Speech is still controlled by the bridge volume. Affects other XP sounds; does not unmute, alter recording gain or change the host mixer. Disabling does not restore old levels. Status reports full, partial or unavailable support. |
-| XP output format | Voice default (recommended), or 16, 22.05, 44.1 or 48 kHz, 16-bit mono. Apply affects subsequent utterances; Test uses the current selection. Connection status shows the format SAPI reports after speech starts. Higher rates cannot add detail to an old low-rate voice, and a fixed rate makes XP's SAPI convert the voice's output: measured on XP, converting the 22.05 kHz Mac voices to 44.1 or 48 kHz added false high frequencies only 21–27 dB below the voice, which can sound harsh or metallic. Use Voice default for the best sound. A low bridge volume (for example 20) also costs detail; prefer a higher bridge volume and lower the volume elsewhere. Unsupported engine/device formats can fail and trigger fallback. |
-| Use local eSpeak if the bridge synthesizer disconnects | Restore local speech after a detected failure. On by default. Detection is not instantaneous. |
-| Automatically return to the bridge after recovery | Off by default. After automatic eSpeak fallback, return only after a short check phrase, sent at volume zero, renders in the original voice. Some XP voices remain audible at volume zero, so the phrase may be heard. Restore the bridge voice, rate, volume and pitch. A deliberate synth/local voice change, a profile switch, disabling the bridge, or turning this option off cancels the pending return. |
-| Write text-free diagnostics log | On by default during the release hold. Records timings, queue counts and error codes (never speech text or window titles) in `angelLegacyVoiceBridge-diagnostics.log` in the NVDA configuration folder. Takes effect immediately after OK or Apply. |
-| Connect / Cancel connection / Disconnect | One button, reflecting the current state. Connect applies the pipe immediately and starts retries. Cancel connection stops a pending connection; Disconnect stops an established one. Both stop mirroring, automatic startup and retries, preserving local speech or selecting eSpeak if needed. To reconnect, press Connect afterward. |
-| Refresh voices and status | Update the displayed information. The updated helper is scanned automatically about every five seconds while speech is idle; installing/removing SAPI5 voices no longer requires restarting it. Up to 128 distinct voice token IDs per helper run; not limited to Mike/Crystal. |
-| Test speech through XP | Send one synthetic phrase using the mirror/test controls. Use a local synth first. Mirroring is suspended during the test, preventing settings announcements from filling its queue. |
-| Stop test speech | Enabled only while test speech is queued/active. Cancels the test; configured mirroring may resume afterwards. To stop everything, use Disconnect or NVDA+Shift+F11. Does not mute local NVDA. |
-| About | Summary of purpose, audio routing, recovery and help. |
+| `AngelLegacyVoiceBridge-<version>.nvda-addon` | Your modern Windows, installed into NVDA |
+| `AngelLegacyVoiceBridge.exe` (from the XP Bridge folder) | Inside the XP virtual machine |
+| `AngelLegacyVoiceBridge-<version>-source.zip` | Only if you want to read or build the source |
 
-The bridge synth's ordinary speech settings are independent of the mirror/test
-rate and volume. Pitch goes from 0–100, mapped to SAPI XML pitch -10 to +10.
-Not every legacy engine implements all pitch/spelling behavior identically.
-Use one pipe across NVDA profiles for this beta; automatic profile-triggered
-transport switching has not been qualified.
+Nothing installs itself. The add-on is never installed inside XP, and the XP
+helper is never installed into NVDA.
 
-Enable, Mirror, Connect, Test and Disconnect are immediate actions, even if you
-later cancel the settings dialog. Other settings apply on Apply/OK. Save NVDA
-configuration to persist choices. Installing this same-version update requires
-replacing **both** the XP helper and host add-on for live voice discovery. The
-add-on requires protocol 2; older protocol-2 helpers still speak but do not
-advertise the live-refresh capability.
+### Step 1: Add a virtual serial port to the VM
 
-## Reconnection and privacy
+This is a one-time change to the virtual machine's hardware, so XP must be shut
+down first.
 
-If the bridge is the active synthesizer and the connection unexpectedly fails,
-**Restore local eSpeak if bridge speech disconnects** is on by default. It
-switches to eSpeak after failure is detected, not the instant XP stops responding.
-In mirror mode the regular local voice remains active anyway. By default, select
-the bridge yourself after recovery.
+1. Inside XP, save your work and shut Windows XP down normally. Do not use
+   "Save the machine state": virtual hardware must not be changed on a saved VM.
+2. In VirtualBox Manager, select the XP machine and choose **Settings**, then
+   **Serial Ports**.
+3. On the **Port 1** tab, set:
+
+   | Field | Value |
+   | --- | --- |
+   | Enable Serial Port | checked |
+   | Port Number | COM1 |
+   | I/O APIC / IRQ | 4 |
+   | I/O Port (address) | 0x3F8 |
+   | Port Mode | Host Pipe |
+   | Connect to existing pipe/socket | **unchecked** |
+   | Path/Address | `\\.\pipe\AngelLegacySpeech-XP` |
+
+4. Click OK.
+
+Leaving "Connect to existing pipe" unchecked is important: it tells VirtualBox
+to *create* the pipe. The add-on is the side that connects to it.
+
+If you prefer the command line, with the VM powered off (substitute your own
+machine name for `Windows XP`):
+
+```powershell
+& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' modifyvm 'Windows XP' `
+    --uart1 0x3F8 4 `
+    --uart-mode1 server '\\.\pipe\AngelLegacySpeech-XP' `
+    --uart-type1 16550A
+```
+
+To confirm it afterwards:
+
+```powershell
+& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' showvminfo 'Windows XP' | Select-String 'UART'
+```
+
+You should see UART 1 enabled at I/O base `0x03f8`, IRQ 4, in server mode on
+your pipe path.
+
+**About the pipe name.** `\\.\pipe\AngelLegacySpeech-XP` is a generic default,
+not tied to any particular computer. You may choose a different name as long as
+it begins with `\\.\pipe\AngelLegacySpeech-`; a unique ending is useful if you
+run more than one XP machine. Whatever you choose, type exactly the same name
+into the add-on. Only one program at a time can use a pipe.
+
+Now start XP normally, with its window visible, and check that its ordinary
+sounds still play.
+
+### Step 2: Put the helper program in XP and run it
+
+1. Copy `AngelLegacyVoiceBridge.exe` into XP. Any folder will do;
+   `C:\AngelLegacyVoiceBridge` is a good choice. Ways to copy it in:
+   - VirtualBox Guest Additions (shared folders or drag and drop), or
+   - an ISO image attached to the VM, or
+   - any other offline transfer you already use.
+
+   Guest Additions are convenient but are not part of the speech connection. Do
+   not switch XP's networking on just to copy a file.
+2. Run it. In XP, press Windows+R, type the full path, and press Enter:
+
+   ```text
+   C:\AngelLegacyVoiceBridge\AngelLegacyVoiceBridge.exe
+   ```
+
+3. A console window opens and prints:
+
+   ```text
+   Angel Legacy Voice Bridge 0.1.2-dev2. Waiting for the host. Ctrl+C exits.
+   ```
+
+   Leave it open and Alt+Tab away, or minimize it. Control+C closes it. Later,
+   when NVDA connects, it also prints `Bridge connected. Audio plays through
+   the XP default output.`
+
+That is all XP needs. There is no driver to install, no service, and no reboot.
+COM1 is the default; if you deliberately configured a different port, start the
+helper with `--com2`, `--com3` or `--com4`. Those are the only arguments it
+accepts:
+
+```text
+Usage: AngelLegacyVoiceBridge.exe [--com1 | --com2 | --com3 | --com4]
+```
+
+If instead it prints `Cannot open configured COM port. Check VM serial settings
+and other bridge instances.`, the port is missing or something else already has
+it. `No SAPI 5 voices registered yet; waiting for voice installation and idle
+scan.` means XP has no usable voice yet, so install one inside XP first.
+
+If you start a second copy it will fail, because the first one already owns the
+COM port. That is expected.
+
+**Starting it automatically.** The program does not add a shortcut or a startup
+entry for you. If you want it to run after XP logs in, put a shortcut to the EXE
+in that XP user's Start Menu > Programs > Startup folder. It needs a logged-in
+user with a working audio session, which is exactly why it is an ordinary
+console program and not a Windows service.
+
+### Step 3: Install the NVDA add-on
+
+Do this on your modern Windows, not in XP.
+
+1. Make sure a local synthesizer you trust is selected in NVDA first.
+2. Open `AngelLegacyVoiceBridge-<version>.nvda-addon` and approve NVDA's
+   installation prompt.
+3. Restart NVDA **when you are ready**. Nothing restarts NVDA for you, and the
+   add-on does not take effect until that restart.
+
+Your existing NVDA settings are kept when you replace the add-on with a newer
+build. The add-on is not available on secure login desktops.
+
+### Step 4: Connect and hear your first test
+
+With XP running and its helper console open:
+
+1. Open the NVDA menu, **Preferences**, **Settings**, and select the
+   **Legacy Voice Bridge** category.
+2. Check the pipe name in **Local bridge pipe**. If you kept the default name
+   there and exactly one bridge pipe is running under a different name, the
+   add-on adopts that one for you. Otherwise press **Detect running VM pipes**
+   and choose yours. If nothing is found it says: "No running bridge pipes
+   found. Start the configured VM, or enter its pipe manually."
+3. Check **Enable bridge now**, or press the **Connect** button. The
+   **Connection status** field should end up reading something like
+   "Connected; audio plays through XP; 14 voices; output: 22050 Hz, 16-bit,
+   1 channel(s)". The voice list fills in by itself; you do not need to press
+   Refresh.
+4. Choose one of your XP voices in **Mirror/test voice**.
+5. Press **Test speech through XP**. You should hear the virtual machine say,
+   in that voice: "Angel Legacy Voice Bridge is ready. This sound comes from
+   Windows XP."
+
+If you hear it, the bridge works. If the status says connected but you hear
+nothing, go to [Troubleshooting](#troubleshooting): that is almost always XP's
+audio, not the connection.
+
+### Step 5: Choose how you want to use the voices
+
+There are two ways to use the bridge, and they suit different people.
+
+**A. Mirroring — keep your normal voice and hear XP as well.**
+
+Check **Mirror local NVDA speech to XP**, then press OK. NVDA keeps speaking
+with your usual synthesizer, and the same speech is also sent to XP. Two voices
+speak at once, slightly out of step with each other. This is the safe way to
+try the bridge, because your normal speech never depends on it. Do not select
+NVDA's "No speech" synthesizer for this; mirroring is designed to accompany a
+working local voice, not to replace it.
+
+**B. As your synthesizer — NVDA speaks only through XP.**
+
+Press NVDA+Control+S to open Select Synthesizer, and choose **Angel Legacy
+Voice Bridge (audio through XP)**. Then set the voice, rate, pitch and volume
+in NVDA's ordinary Speech settings, exactly as you would for any other
+synthesizer. Mirroring switches itself off while the bridge is your
+synthesizer, so you never hear the same words twice.
+
+Finally, save your NVDA configuration with NVDA+Control+C (or let NVDA save on
+exit) if you want these choices remembered.
+
+### Updating an existing installation
+
+Replace **both** parts. The two halves are released together and are meant to
+match, even when the version number has not changed:
+
+1. In NVDA, switch to a local synthesizer and press Disconnect.
+2. In XP, press Control+C in the helper console, replace
+   `AngelLegacyVoiceBridge.exe` with the new one, and start it again. XP does
+   not need to reboot.
+3. Install the new `.nvda-addon` and restart NVDA when it is safe to do so.
+
+Your saved settings are kept. Building the source does not update or restart a
+running NVDA.
+
+## Everyday use
+
+**Starting up.** The helper in XP has to be running before NVDA can connect.
+**Connect automatically when NVDA starts** makes NVDA reconnect at startup, but
+it cannot boot the virtual machine or launch the helper for you.
+
+**Stopping the bridge quickly.** Press **NVDA+Shift+F11**. NVDA answers "Bridge
+disabled. Local speech only." That one command disables bridge speech,
+mirroring, automatic startup and any retries, and keeps your current local
+synthesizer (or switches to eSpeak if the bridge itself was selected). The same
+thing happens if you uncheck **Enable bridge now** or press **Disconnect**. You
+can reassign the shortcut in NVDA's Input Gestures dialog, under the **Angel
+Legacy Voice Bridge** category.
+
+**Changing the sound quality on the fly.** With the bridge selected as your
+synthesizer, press NVDA+Control+Right Arrow until you reach **XP output
+format**, then NVDA+Control+Up or Down Arrow to change it. The next thing
+spoken uses the new setting; nothing has to reconnect or restart. **Voice
+default is recommended** and usually sounds best. The other choices make XP's
+SAPI convert the voice's own output, which can add a harsh or metallic edge:
+measured on XP, converting the 22.05 kHz Mac voices to 44.1 or 48 kHz added
+false high frequencies only 21 to 27 dB below the voice itself.
+
+**Installing new voices in XP.** You do not have to restart the helper or
+reconnect. NVDA asks XP to re-examine its SAPI 5 registrations about every five
+seconds while speech is idle, and new voices appear in the list on their own. A
+voice installer may still ask XP to reboot for its own reasons. Three details
+are worth knowing:
+
+- A scan that XP could not finish is not used at all; the previous list is kept
+  and the next attempt waits an extra 25 seconds.
+- If a scan gets no answer within four seconds while the connection otherwise
+  looks alive, scanning is switched off until you reconnect. Your existing
+  voices keep working; press Disconnect and Connect again to resume scanning.
+- A helper run tracks up to 128 different voices, and if XP ever reports more
+  than 128 at once the list is left unchanged rather than truncated. Restart
+  the helper in XP if you reach that.
+
+**Volume.** Prefer a higher bridge volume and turn the sound down elsewhere: a
+low bridge volume, such as 20, throws away detail in the voice. Note that
+volume 0 is not a reliable mute. Some engines, AT&T Natural Voices among them,
+keep speaking at roughly 18% of their normal loudness at volume zero, and they
+do the same in plain XP without this project. To stop bridge speech, use
+Disconnect or NVDA+Shift+F11.
+
+## Every setting explained
+
+These are in NVDA menu > Preferences > Settings > **Legacy Voice Bridge**.
+
+| Setting or button | What it does |
+| --- | --- |
+| Enable bridge now | The master switch for the current session. Checking it connects and discovers voices; unchecking it stops bridge speech, mirroring and retries at once. Off by default. |
+| Connect automatically when NVDA starts | Reconnects at the next NVDA start, if the master switch is on. It does not boot XP or start the helper. Turning it off does not stop speech that is running now. Off by default. |
+| Local bridge pipe | The exact pipe name your VM creates. No IP address and no guest password are involved. Switch to a local synthesizer before you change this. |
+| Detect running VM pipes | Lists the matching pipes that exist right now, so you can pick one. It does not start, change or inspect a virtual machine. It can only find a pipe that is already configured. |
+| Mirror local NVDA speech to XP | Sends your speech to XP as well as to your normal synthesizer. Turning it off cancels mirrored speech immediately. The two voices can overlap and drift apart in timing. Off by default. |
+| Mirror/test voice | Which XP voice mirroring and the Test button use. It is saved by the voice's SAPI token ID, so it survives changes in list order. |
+| Mirror/test rate (0–100) | 50 by default, which is SAPI's normal speed. Engines interpret speed differently. |
+| Mirror/test volume (0–100) | 100 by default. Independent of the Windows and VM mixers. Zero silences most voices but not all of them (see above). |
+| Set XP playback mixer to 100% when adjusting bridge volume | Optional, off by default. Asks XP to put its preferred output's master and Wave levels at maximum when you connect, test, apply or change the bridge volume. Bridge volume still controls the speech. It affects other XP sounds, never unmutes anything, does not touch recording levels or your host's volume, and does not put the old levels back when you turn it off. The status line reports whether XP supported it fully, partly or not at all. |
+| XP output format | Five choices, listed below this table. All bridge speech is 16-bit mono. Apply affects later speech; Test uses the current choice. A higher rate cannot add detail that an old voice never had, and a fixed rate makes XP convert the audio, which can sound harsher. The status line shows what SAPI actually reported once speech starts. An unsupported format can fail and trigger fallback. |
+| Restore local eSpeak if bridge speech disconnects | Brings local speech back after a failure is detected, announcing "Legacy bridge unavailable. Switched to local eSpeak." On by default. Detection takes a few seconds; it is not instant. |
+| Automatically return to the bridge after recovery | Off by default. After an automatic fallback to eSpeak, go back to the bridge, but only once the voice has proved it can still speak. See [What happens when the voice fails](#what-happens-when-the-voice-fails). |
+| Write text-free diagnostics log | On by default while the release is on hold. Records timings, queue counts and error numbers, never the words you hear, in `angelLegacyVoiceBridge-diagnostics.log` in your NVDA configuration folder. Takes effect as soon as you press OK or Apply, with no restart. If you turn it off before anything is written, no log file is created at all. Existing log files are never deleted for you. |
+| Connection status | Read-only. Reports the connection, the number of voices found and the audio format XP reported, and the XP mixer result when that option is on. |
+| Connect / Cancel connection / Disconnect | One button that changes with the state. Connect applies the pipe name immediately and starts retrying. Cancel connection stops a connection attempt; Disconnect ends an established one. Both stop mirroring, automatic startup and retries, and keep local speech working. |
+| Refresh voices and status | Updates what is displayed. It is a convenience: the list already updates by itself. |
+| Test speech through XP | Speaks one fixed sentence using the mirror/test voice, rate and volume. Use it while a local synthesizer is selected. Mirroring pauses during the test so that settings announcements do not pile up behind it. |
+| Stop test speech | Only available while test speech is playing or queued. It cancels **the test only**, not the bridge, and mirroring may resume afterwards. It never mutes local NVDA. To stop everything, use Disconnect or NVDA+Shift+F11. |
+| About | A short summary of what the add-on does, where the audio comes from, and how recovery works. |
+
+The five **XP output format** choices, exactly as NVDA reads them out:
+
+| Choice | When to use it |
+| --- | --- |
+| Voice default (recommended, best quality) | Almost always. The voice's own rate, with no conversion. |
+| 16 kHz, converted by XP (lower quality) | Rarely; only if a device rejects everything else. |
+| 22.05 kHz, converted by XP unless the voice already uses it | Free of conversion for voices that are natively 22.05 kHz. |
+| 44.1 kHz, converted by XP (can sound harsher) | If a sound device insists on this rate. |
+| 48 kHz, converted by XP (can sound harsher) | Likewise. |
+
+A few notes that apply to the whole panel:
+
+- Enable, Mirror, Connect, Test and Disconnect take effect immediately, even if
+  you close the dialog with Cancel afterwards. Everything else applies on
+  Apply or OK.
+- The bridge synthesizer's own voice, rate, pitch and volume are separate from
+  the mirror/test controls above. Pitch runs 0 to 100 and maps to SAPI's XML
+  pitch of -10 to +10. Not every legacy engine honours pitch or spelling
+  identically.
+- Use one pipe across all your NVDA profiles for now. Switching transports
+  automatically when a profile changes has not been qualified.
 
 ### Turning on automatic return
 
-Automatic return is off by default. To turn it on, use either:
+Automatic return is off by default. Turn it on in either of these ways:
 
-- NVDA menu → Preferences → Settings → **Legacy Voice Bridge**, check
-  **Automatically return to the bridge after recovery**, then OK; or
+- NVDA menu > Preferences > Settings > **Legacy Voice Bridge**, check
+  **Automatically return to the bridge after recovery**, then press OK; or
 - the command **Turn automatic return to the bridge after recovery on or off**.
-  It has no key by default: assign one in NVDA menu → Preferences → Input
-  gestures, category **Angel Legacy Voice Bridge**. It says "Automatic return to
-  the bridge on" or "off". Turning it off also cancels any pending return.
+  It has no key assigned by default. Give it one in NVDA menu > Preferences >
+  Input gestures, in the **Angel Legacy Voice Bridge** category. It announces
+  "Automatic return to the bridge on" or "off" when you press it, and turning
+  it off also cancels any return that was pending.
 
-Both **Restore local eSpeak if bridge speech disconnects** and automatic return
-must be on for the round trip. Save your configuration if NVDA does not save it
-on exit.
+**Restore local eSpeak if bridge speech disconnects** must also be on,
+since automatic return only ever follows that automatic fallback.
 
-Transport I/O runs on a worker, not NVDA's UI thread. An unavailable helper is
-retried about once a second while connection is enabled. Only selecting/restoring the bridge synthesizer permits
-a bounded two-second initial handshake wait; an unavailable VM then falls back
-through NVDA's normal synth-loading behavior. A connected session normally fails after about
-four seconds without replies. The XP helper discards speech after about six
-seconds without host contact. OS/VM stalls can extend these timings. A voice
-that fails to finish an utterance is treated as failed after 120 seconds plus
-half a second per text character, excluding pauses. Missing packet acknowledgements
-time out after about four seconds even if heartbeats still arrive. These are
-safety timeouts, not promised response times.
+## What happens when the voice fails
 
-Speech queued before a disconnect/cancel is not replayed after recovery. An
-automatic return only follows this add-on's own eSpeak fallback, never an ordinary
-manual selection of local speech. Changing synthesizer or local voice cancels
-the pending return, as do disabling the bridge, turning automatic return off,
-and switching NVDA configuration profile. A missing original XP voice
-keeps local speech active until that voice returns. Failed restoration stays on
-local speech instead of repeatedly switching. Pending recovery is not saved
-across NVDA restarts. The output format remains the shared bridge setting.
+If the bridge is your synthesizer and the connection or the voice engine fails,
+NVDA does not go silent: **Restore local eSpeak if bridge speech disconnects**
+is on by default, and once the failure is detected NVDA says "Legacy bridge
+unavailable. Switched to local eSpeak." and carries on in eSpeak. In mirror
+mode your local voice was speaking all along anyway.
+Anything that was queued when the failure happened is thrown away rather than
+replayed later.
 
-A reconnected pipe or a listed voice is not treated as recovery: a crashed
-voice engine can leave both intact. While eSpeak speaks normally, the add-on
-sends a short fixed check phrase to the original voice at volume zero, first
-after 5 seconds, then at doubling intervals up to one minute. Only a completed
-render, confirmed by its final bookmark, allows the return. Checks stop after
-12 attempts or 15 minutes, and NVDA says "Bridge voice did not recover. Staying
-on eSpeak." If eSpeak is mid-sentence when a check succeeds, the return waits
-up to 8 seconds for it to finish, then interrupts. A successful return says
-"Bridge voice recovered." through the restored voice. The check proves the
-engine rendered that phrase, not that later text cannot fail again.
+By default you then choose for yourself when to go back to the bridge.
 
-The check is inaudible only on voices that honour SAPI's volume setting. On
-the development XP VM, the check phrase rendered to files at volume zero was
-completely silent for Microsoft Sam and all 26 Panthera (Classic Mac and Alex)
-voices. AT&T Natural Voices Mike16 and Crystal16 ignored both the in-text and
-the base SAPI volume and stayed at about 18% of their normal peak, so with
-those voices you will briefly hear the check phrase from the VM. Other vendors
-are untested.
+**If you turned automatic return on**, the add-on does not trust appearances. A
+pipe that reconnects, or a voice that still appears in the list, proves
+nothing; a crashed engine can leave both looking perfectly healthy. Instead,
+while eSpeak is speaking normally, it quietly sends a short fixed check phrase
+to the original voice at volume zero and waits for the final bookmark that
+proves the voice really rendered it.
 
-At most three automatic returns happen in ten minutes, and each recent return
-lengthens the first wait (5, 10, then 20 seconds). If another failure follows
-those returns, NVDA says "Bridge failed repeatedly. Staying on eSpeak."; select
-the bridge manually after correcting the underlying problem.
+- The first check is after 5 seconds, then the wait doubles up to one minute.
+  Any single check that has not produced its bookmark within 15 seconds counts
+  as a failure, and the next one is scheduled.
+- Checks stop after 12 attempts or 15 minutes, and NVDA says
+  "Bridge voice did not recover. Staying on eSpeak."
+- When a check succeeds, your bridge voice, rate, volume and pitch are
+  restored, and NVDA says "Bridge voice recovered." through that voice.
+- If eSpeak is in the middle of a sentence when the check succeeds, the return
+  waits up to 8 seconds for it to finish before interrupting.
+- At most three automatic returns happen in ten minutes, and each recent return
+  makes the first wait longer (5, then 10, then 20 seconds). After that NVDA
+  says "Bridge failed repeatedly. Staying on eSpeak." and leaves the choice to
+  you.
+- Changing synthesizer or local voice yourself, switching NVDA configuration
+  profile, disabling the bridge, or turning the option off all cancel a pending
+  return. A return that is pending is not remembered across an NVDA restart.
 
-This is local inter-process communication, **not encryption or a security
-boundary against other software on the host**. Only trust the VM/helper and
-host programs using the pipe. Text intentionally goes into XP and the voice
-engine. Bridge logs omit speech content; NVDA's own logging configuration and
-other add-ons may have different policies. Do not copy the add-on to secure
-login settings; bridge operation is disabled in NVDA secure mode. Keep XP
-offline and use a backup of the VM.
+**Will you hear the check phrase?** Only on voices that ignore SAPI's volume
+setting. Measured on the test XP machine, the check was completely silent for
+Microsoft Sam and for all 26 Panthera (Classic Mac and Alex) voices, while
+AT&T Natural Voices Mike16 and Crystal16 stayed at about 18% of their normal
+peak, so with those two you will briefly hear it from the VM. Other vendors
+have not been measured.
 
-## Limitations and future work
+A successful check proves the engine rendered that one phrase. It cannot
+promise that the next paragraph will not fail.
 
-### Newly installed voices
+## Troubleshooting
 
-The updated helper re-enumerates 32-bit SAPI5 voice registrations at the host's
-request, about every five seconds when speech is idle. Continuous reading defers
-the scan until an idle gap. No helper restart or reconnect is needed; a voice
-installer may still require its own restart. Only fully registered voices are
-offered. The settings panel and bridge synthesizer ring update from the new
-catalog. Removing the selected voice triggers the normal failure/fallback path.
-Replacing the engine behind an unchanged token ID is different from adding a
-voice; restart the helper after an engine upgrade if its installer requires it
-or the running engine retains old components.
-Incomplete scans keep the last good catalog and retry later. Unchanged catalogs
-use a short acknowledgement, not a full retransmission. Speech arriving during
-a scan waits for it; this is not a zero-latency system. A scan timeout with a
-still-responsive link disables scanning until reconnect rather than repeatedly
-replacing the user's synthesizer.
+**The voice list is empty, or it will not connect.**
+Check that the helper console is still open in XP, that COM1 exists in XP's
+Device Manager, that the pipe name in NVDA matches the one in the VM settings
+exactly, and that no other copy of the helper or a test script already owns the
+pipe. XP's own Speech control panel is a good way to confirm the voices work
+inside XP at all. NVDA's log (NVDA menu > Tools > View log) and the helper
+console both report what went wrong.
 
-Indexes remain stable for the helper's lifetime, including across removals, so
-queued requests never silently switch to another voice. Up to 128 distinct token
-IDs are retained per helper run; restart the helper if this lifetime limit is
-reached. A controlled XP test added, spoke through, and removed a disposable
-SAPI5 registration on the same live connection. This is not a qualification of
-every commercial voice installer.
+**NVDA says "Connect and test the XP helper in Legacy Voice Bridge settings
+first."**
+You tried to select the bridge as your synthesizer before it had a working
+connection and a voice list. Start XP and its helper, connect in the Legacy
+Voice Bridge settings, confirm the test speech, and then select the
+synthesizer.
 
-### Running XP without a visible window
+**It says connected, but I hear nothing.**
+The connection carries text, not audio, so this is almost always sound. Check
+XP's own sounds, XP's default playback device, the volume and mute state inside
+XP, your virtual machine's audio output setting, and try a different SAPI 5
+voice. If XP is silent for its own start-up sounds too, fix that first.
 
-Use VirtualBox's **Start with detachable GUI** at the VM's next normal start.
-The command-line equivalent, only while powered off, is:
+**A voice is silent for a moment right after I switch to it, then fine.**
+That is the voice engine starting up, not the bridge. It was seen with the Mac
+Alex voice packs, whose engine sometimes answered its very first utterance with
+a single silent frame and no error at all. Those voice packs now render such an
+utterance a second time.
 
-```powershell
-& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' startvm 'Windows XP' --type separate
-```
+**The sound is harsh, metallic or hissy.**
+Set **XP output format** to Voice default. A fixed sample rate makes XP convert
+the voice's own output and that conversion is audible. The format is shared by
+every bridge voice, so if one voice prefers a different setting, change it from
+the synthesizer settings ring as you switch voices. Also check your bridge
+volume: a low volume such as 20 costs real detail.
 
-Then choose **Machine > Detach GUI** to hide the window while XP keeps running.
-Select the running VM in VirtualBox Manager and choose **Show** to control it
-again. Detaching/reattaching in this mode does not reboot XP. An already-running
-ordinary GUI session should simply be minimized; this project does not promise
-to convert its launch mode in place. Use detachable mode at its next normal start.
-See [Oracle's separate-mode instructions](https://docs.oracle.com/en/virtualization/virtualbox/7.2/user/remotevm.html).
+**Speech is slow, or it gets stuck.**
+Select a local synthesizer, stop any test speech, close the helper in XP with
+Control+C, start it again and press Connect. Virtual machine CPU load, the VM's
+audio driver and slow legacy engines all affect responsiveness. Never turn XP's
+networking on as a workaround, and never run the developer integration tests
+while the bridge is your only speech.
 
-XP must still be logged in with working audio and the helper running. Hiding
-the VM does not launch the helper. The listening tests used a visible VM;
-detached/headless audio has not been qualified here. No VM reboot is needed for
-this add-on/helper update.
+**NVDA froze.**
+Use your emergency speech, keep the diagnostics log, and please
+[open an issue](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
+describing what was being read at the time. Include your NVDA, VirtualBox and
+XP versions, the 32-bit SAPI 5 engine's name, the connection status and the
+output format you had selected. Do not attach anything containing private
+speech text or voice licenses; the diagnostics log deliberately contains
+neither.
 
-### Starting the helper manually or automatically
+Operator-level details, maintenance commands and the disable-only tool are in
+[OPERATIONS.md](OPERATIONS.md).
 
-In the local test installation the program is
-`C:\AngelLegacyVoiceBridge\AngelLegacyVoiceBridge.exe`. In XP, press Windows+R,
-enter that path and press Enter. It opens a console; Alt+Tab or minimize it,
-and use Control+C to exit. It is not a Windows service. Other users can choose
-their own installation folder. Guest Additions can also launch that same EXE.
+## Removing it
 
-The package does **not** create a desktop shortcut or an automatic-start entry.
-To start after XP logon, create a shortcut to the EXE in that XP user's Start
-Menu > Programs > Startup folder. Automatic Windows logon is separate and is
-not configured by the add-on. The helper needs that user's audio session.
-NVDA's Legacy Voice Bridge settings provide the GUI for pipe discovery,
-connection, voices, format and recovery after the one-time VirtualBox serial
-port setup; they do not automatically configure or boot a VM.
+1. Select a local synthesizer, and turn off mirroring and automatic connection.
+2. Remove the add-on in NVDA's Add-on Store or add-ons manager, and restart
+   NVDA when it suits you.
+3. In XP, press Control+C in the helper console and delete its folder.
+4. Optionally, with the VM powered off, disable the serial port again in
+   VirtualBox Settings.
 
-- No system-wide SAPI5 adapter, LAN transport, SAPI4 voices, host-side audio
-  streaming, automatic hypervisor reconfiguration or Windows service yet.
-- XP must have an interactive audio session. A console is the simplest way to
-  verify the correct voice/audio user context before considering a service.
-- Small transport packets are assembled into one SAPI utterance before playback,
-  without inserting prosody tags at packet boundaries. SAPI bookmarks provide
-  index notifications. Natural punctuation, requested breaks, separate NVDA
-  utterances and VM scheduling can still cause pauses; no zero-latency claim.
-- At most 16,000 text characters/256 sequence items per utterance and 64 queued
-  utterances. Very large requests fail safely rather than expanding indefinitely.
-- Output-format conversion is not audio restoration. A 16 kHz voice remains a
-  16 kHz source even when rendered at 48 kHz. This does not fix a faulty VM driver.
-- Mirroring follows queued NVDA speech, not a recording of the local voice. It
-  is not an exact replica of NVDA's priority/preemption timing.
-- Engine-specific pronunciation, spelling, pitch, long reading and actual
-  audible responsiveness still need user acceptance testing.
-- This transports SAPI5 requests; it does not make unsupported or unlicensed
-  voices compatible. A later host SAPI5 adapter could reuse the protocol, but
-  would require a separately tested COM voice engine and installers.
+Removing this project never requires deleting your virtual machine or your
+voices.
 
-## Troubleshooting and removal
+## Other virtual machines and emulators: contributions welcome
 
-For helper startup commands, safe maintenance disconnects, diagnostics, and
-step-by-step automation instructions, see [OPERATIONS.md](OPERATIONS.md). The
-local maintenance interface can only disable the bridge; it cannot send speech,
-execute commands, change settings arbitrarily or connect from another computer.
+VirtualBox is the only platform that has actually been tested, so it is the
+only one currently supported. That is a matter of testing effort, not of
+design: the transport is deliberately plain. It is one local Windows named pipe
+carrying short tab-separated ASCII lines, described in
+[PROTOCOL.md](PROTOCOL.md). Anything that can present a guest serial port to
+the Windows host as a named pipe ought to be able to run this bridge.
 
-No voices: confirm the helper console stays open, COM1 exists in XP Device
-Manager, the pipe matches, and no other bridge/test process owns it. Check the
-helper's lifecycle messages and NVDA Tools, View log. Do not post private speech
-logs. XP's Speech control panel can verify that its installed voices work.
+**If you would like to add or qualify support for another platform, please open
+a pull request. We would be happy to review it, and to test it ourselves where
+we have the platform available.** Issues describing what worked or failed are
+just as welcome as code. Platforms we would like to see covered include:
 
-Connected but silent: test XP sounds, its default sound device, the hypervisor
-audio output, volume/mute, and a different SAPI5 voice. The pipe carries text,
-not audio, so a successful connection cannot prove speakers are audible.
+- VMware Workstation, VMware Player and VMware Fusion
+- QEMU, including QEMU/KVM builds for Windows
+- Microsoft Hyper-V (its COM ports can be pointed at a named pipe with
+  `Set-VMComPort`)
+- 86Box and PCem, which many people use for genuinely old Windows installations
+- Microsoft Virtual PC
+- Any other emulator or hypervisor with a serial port and working sound
 
-Silent only for a moment after switching to a voice, then fine: that is the
-voice engine starting up, not the bridge. It was seen with the Mac Alex voice
-packs, whose engine sometimes answered its first utterance with a single silent
-frame and no error; those packs now render such an utterance once more.
+A different **guest** is also a fair contribution: Windows 98, Windows 2000 or
+32-bit Vista all have SAPI 5 voices of their own, and the helper only needs a
+COM port and an audio session.
 
-Harsh or metallic sound: set **XP output format** to Voice default. Voices do
-not all prefer the same setting; the format is shared by every bridge voice, so
-change it in the synthesizer settings ring when you change to a voice that
-sounds better with another format.
+Because NVDA itself runs on Windows, the hypervisor has to be on the same
+Windows computer today. Adding a different transport, such as a Unix domain
+socket or a loopback socket, would open the door to other hosts. That is a
+welcome idea but a larger change: the project deliberately has no network
+listener, so such a contribution needs a careful look at what it exposes, and
+it must stay off by default.
 
-Slow/stuck: restore local speech, stop the test, close/reopen the XP helper and
-reconnect. VM CPU load, driver quality and legacy engine startup affect delay.
-Never turn networking on as a fix. Do not run integration tests while using the
-bridge as your only screen reader.
+What a platform port should demonstrate before it is called supported:
 
-To remove: select local eSpeak, disable mirroring/automatic connect, remove the
-add-on through NVDA and restart NVDA when convenient. Close the helper with
-Control+C and delete only its own folder if no longer needed. Disabling the
-virtual serial port is optional and requires powering down the VM; removing
-this program never requires deleting your VM or voices.
+1. The pipe is created by the hypervisor and the add-on can connect to it.
+2. Voices are discovered and speak audibly through the guest's sound output.
+3. Cancellation and pausing behave, including interrupting long speech.
+4. Disconnecting, reconnecting and the eSpeak fallback all work.
+5. The guest and hypervisor versions you tested are written down.
 
-## Build and developer tests
+### VMware notes to start from
 
-Use Python 3.13, Visual Studio 2022 C++ x86 tools and a Windows 10 SDK. No WSL or
-internet is required once those build dependencies are installed:
+These have not been tested here; they are a starting point, not a recipe.
+With the VM powered off, add a Serial Port, choose "Use named pipe", enter the
+same pipe path you configure in the add-on, set **this end as the server** and
+**the other end as an application**, and connect the device at power on. Match
+the guest's COM number to the helper's `--com` option. If your version of
+Workstation offers "Yield CPU on poll", turning it on may help. Keep guest
+networking off, and do not use a remote pipe or expose this unencrypted local
+protocol to a network. VMware's own user interface naming varies between
+versions, so check its serial-port documentation for the version you have.
+
+## Known limits
+
+- The bridge carries SAPI 5 requests. It cannot make an unsupported or
+  unlicensed voice work, and it does not support SAPI 4-only engines.
+- It is not a system-wide SAPI 5 voice, a Windows service or a network service.
+  Only NVDA speaks through it.
+- XP needs a logged-in user with a working audio session. That is why the
+  helper is a console program you can see and close.
+- An English-only voice still cannot pronounce every language or emoji. The
+  bridge does not strip non-English text; voices that support it must receive
+  it.
+- Limits per utterance are 16,000 characters and 256 sequence items, with up to
+  64 utterances queued. Larger requests fail cleanly instead of growing without
+  bound.
+- Output-format conversion is not audio restoration. A 16 kHz voice is still a
+  16 kHz voice when rendered at 48 kHz, and no setting here repairs a poor
+  virtual audio driver.
+- Mirroring follows NVDA's queued speech. It is not a recording of your local
+  voice and it does not reproduce NVDA's interruption timing exactly.
+- Pronunciation, spelling behaviour, pitch handling, long reading and real
+  perceived responsiveness are all still matters for user testing.
+- Timings such as the retry interval, the roughly four-second failure detection
+  and the guest's six-second purge are safety limits, not promised response
+  times. A busy computer or virtual machine can stretch them.
+- Running XP without a visible window works: at the VM's next normal start use
+  VirtualBox's **Start with detachable GUI** (`VBoxManage startvm 'Windows XP'
+  --type separate`), then Machine > Detach GUI to hide it, and Show in
+  VirtualBox Manager to get it back. XP keeps running and does not reboot.
+  Detached and headless audio have not been qualified here, though, so the
+  listening tests were all done with a visible window.
+
+## Privacy and security
+
+- Everything is local. There is no account, no telemetry, no online voice
+  service and no automatic updater.
+- The named pipe is **not encrypted and is not a security boundary** against
+  other software already running on your computer as you. Trust the virtual
+  machine, the helper and anything else using that pipe.
+- Your text goes into XP and into the voice engine on purpose. That is the
+  whole point of the project.
+- This project's own logs never contain spoken text, window titles, document
+  contents or credentials. The diagnostics log holds timings, counters, error
+  numbers, code locations and, when speech fails, a "text shape": counts of
+  digits, letters, spaces, punctuation, non-ASCII characters, `[[` and `]]`
+  pairs, words and the longest word's length, never the words themselves. The
+  XP helper keeps a similar text-free log, `bridge-sapi-errors.log`, beside its
+  own executable; it holds a timestamp, a numeric stage, an error number, a
+  voice slot and a format number per line, and is emptied when it reaches 1 MiB.
+  NVDA's own log settings and other add-ons may behave differently.
+- Writing diagnostics happens on a separate thread with a bounded queue, so a
+  slow disk drops records instead of delaying your speech. The current log and
+  two rotated copies come to roughly 3 MiB in total. Nothing is uploaded.
+- A native crash, an abrupt process kill or a full disk can still stop evidence
+  from being recorded. This is a diagnostic aid, not a guaranteed crash
+  recorder, and it cannot rescue speech while NVDA itself is hung.
+- Bridge operation is disabled in NVDA's secure mode, and the add-on should not
+  be copied into secure login settings.
+- Keep XP offline, and keep a backup of the virtual machine.
+
+## Building from source
+
+You need Python 3.13, the Visual Studio 2022 C++ **x86** build tools and a
+Windows 10 SDK. No internet access and no WSL are needed once those are
+installed.
 
 ```powershell
 python -m unittest discover -s tests -v
 python build.py
 ```
 
-Optional hidden-widget check, with host wxPython installed:
-`python tools/ui_smoke.py`. It uses real widgets and isolated NVDA API doubles;
-it does not launch, install over, or restart your running NVDA.
+Output lands under `dist`, in separate folders for the helper and the add-on,
+with documentation, license and SHA-256 sidecar files. The add-on contains its
+Python source in readable form, and the separate source ZIP contains the XP
+helper's C++ source and the build script, so no part of this is an opaque
+binary blob.
 
-Build output goes under `dist`, including separate helper/add-on directories,
-documentation, license and SHA-256 sidecars. The add-on contains its Python
-source. The separate source ZIP includes `bridge/main.cpp`, `bridge/runtime.cpp`
-and `build.py` for building the native XP EXE; it is not an opaque binary-only
-component. Local continuity notes and Git history are excluded from that ZIP.
-
-Optional live mixer test: `python tools/mixer_probe.py --allow-volume-change`.
-This changes XP playback levels; do not run it without permission. The live
-voice-registration probe is for a disposable test token, not proprietary voice
-installation/uninstallation; see the operations guide.
-The XP helper avoids newer CRT imports using a small freestanding entry point.
-It uses explicit bounds, but disabling the compiler's CRT-backed stack cookie
-is a legacy compatibility compromise; do not expose this helper to strangers.
-
-Opt-in tests against a running helper, with no active bridge NVDA connection:
+Optional checks:
 
 ```powershell
-python tools/smoke.py
-python tools/smoke.py --speak
-python tools/integration.py
-python tools/quality_probe.py
+python tools/ui_smoke.py          # hidden real-widget check; needs wxPython
+python tools/smoke.py             # against a running helper, no speech
+python tools/smoke.py --speak     # audible phrase
+python tools/integration.py       # framing, all voices, cancellation (muted)
+python tools/quality_probe.py     # output formats and utterance assembly
 ```
 
-Add `--pipe '\\.\pipe\AngelLegacySpeech-your-name'` if not using the generic
-default. The smoke test's `--speak` phrase is audible; integration/quality speech
-is muted. These command-line probes do not automatically select another pipe.
-See [PROTOCOL.md](PROTOCOL.md) for messages/state, and
-[TEST-REPORT.md](TEST-REPORT.md) for actual results and remaining checks.
+Add `--pipe '\\.\pipe\AngelLegacySpeech-your-name'` if you did not use the
+default pipe name. Run these with the bridge **disconnected** in NVDA, and
+never while the bridge is your only speech. None of them launches, installs
+over or restarts your running NVDA.
+
+`python tools/mixer_probe.py --allow-volume-change` changes XP's playback
+levels, so only run it deliberately. The live voice-registration probe uses a
+disposable test token; it is not for installing or removing real voices.
+
+The XP helper is built without the modern C runtime and with the compiler's
+stack cookie disabled so that it runs on XP. Buffers have explicit bounds, but
+that is a legacy compatibility trade-off: do not expose this helper to
+untrusted input or strangers.
+
+[PROTOCOL.md](PROTOCOL.md) describes the wire protocol and state machine.
+[TEST-REPORT.md](TEST-REPORT.md) records what has actually been tested and what
+has not. [OPERATIONS.md](OPERATIONS.md) covers maintenance and automation.
+[PUBLICATION.md](PUBLICATION.md) is the checklist that must be followed before
+anything is published.
 
 ## License and references
 
-Before public release, follow [PUBLICATION.md](PUBLICATION.md). The add-on build
-does not bundle personal NVDA configuration, VM disks, passwords or recordings.
-Do not publish the entire development workspace or its unreviewed Git history.
+Copyright 2026 Angels Clan. This project's original code is licensed under the
+GNU General Public License, version 2 or, at your option, any later version.
+See [LICENSE](LICENSE). NVDA, VirtualBox, VMware and the voice engines all have
+their own licenses, and no voice data is redistributed here.
 
-Copyright 2026 Angels Clan. This project's original code is licensed under
-GNU GPL version 2 or, at your option, any later version. See LICENSE.
-NVDA, VirtualBox, VMware and the voice engines have their own licenses.
-
-Primary references: [VirtualBox serial ports](https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/serialports.html),
-[NVDA user guide](https://download.nvaccess.org/documentation/userGuide.html),
-[NVDA synthesizer API source](https://github.com/nvaccess/nvda/blob/master/source/synthDriverHandler.py),
-[Microsoft SAPI speech flags](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms720892(v=vs.85)).
+- [VirtualBox serial ports](https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/serialports.html)
+- [VirtualBox separate/detachable mode](https://docs.oracle.com/en/virtualization/virtualbox/7.2/user/remotevm.html)
+- [NVDA user guide](https://download.nvaccess.org/documentation/userGuide.html)
+- [NVDA synthesizer API source](https://github.com/nvaccess/nvda/blob/master/source/synthDriverHandler.py)
+- [Microsoft SAPI speech flags](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms720892(v=vs.85))

@@ -1,5 +1,9 @@
 # Operator and automation guide
 
+This guide is for administrators, developers and anyone setting the bridge up
+on someone else's behalf. **If you just want to install and use it, you only
+need [README.md](README.md);** nothing here is required for normal use.
+
 ## Boundaries and reasons
 
 Keep XP offline. A local virtual serial pipe carries speech requests, not audio;
@@ -175,7 +179,11 @@ speech-dependent user to reproduce a freeze. Inspect already available logs and
 use an isolated, muted NVDA configuration for developer fault injection.
 
 The development build writes `angelLegacyVoiceBridge-diagnostics.log` in NVDA's
-configuration directory, independent of its normal log filter. Version 0.1.1
+configuration directory, independent of its normal log filter. It is controlled
+by **Write text-free diagnostics log** in the Legacy Voice Bridge settings, on
+by default during the hold; clearing that box stops writing immediately after
+OK or Apply, and with it off from the start no file is created at all. Existing
+files are never deleted automatically. Version 0.1.1
 attempted to log progress at INFO level through a third-party Python logger;
 NVDA normally filters those records, so their absence is not evidence of idle
 speech. The new file records numeric queue/progress counters, stalled main-thread
