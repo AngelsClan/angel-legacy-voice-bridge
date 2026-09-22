@@ -7,6 +7,36 @@ reproduced" or "not qualified" mean exactly that and are not claims of absence.
 For setup and use, see [README.md](README.md); for the current release state,
 see [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
+## Diagnostics blackout — 2026-09-22
+
+Found in the user's own logs, not in a test. `angelLegacyVoiceBridge-diagnostics.log`
+stopped recording at a rotation boundary and stayed empty for the next three
+and a half hours, while NVDA ran continuously and the bridge was the selected
+synthesizer for two of them. The preference was on, and NVDA's own log shows
+no configuration reload and no error, so the monitor simply stopped and never
+resumed. Because the same heartbeat drives the main-thread freeze detector,
+freeze detection stopped with it. That is the mechanism intended to capture
+the very incident that put this release on hold.
+
+Two paths could produce it, and both are now closed. A queued heartbeat was
+only cleared on delivery, so a callback NVDA never ran latched the pending
+flag and silenced every later tick; it is now re-armed after 30 seconds and
+the re-arm is recorded. And a global plugin now holds a token for the monitor
+it started, so an instance shutting down after its replacement has started
+cannot stop the live monitor; a monitor whose thread has died is replaced.
+
+The idle backlog record was also repeating every five seconds whenever the
+bridge was the selected synthesizer, because that flag was counted as a
+nonzero backlog. That is what rotated the evidence away fastest during exactly
+the sessions worth keeping. Idle sampling is once a minute again.
+
+152 unit tests pass, five of them new: a lost callback is re-armed and
+delivery resumes; the re-arm is reported once per loss; a retired instance
+cannot stop its replacement; a dead monitor thread is replaced; and idle
+bridge use does not log every tick. Verified by unit test only — this was not
+reproduced in a live NVDA, and no claim is made that it explains the reported
+freeze.
+
 ## Documentation pass — 2026-09-22
 
 Documentation only; no source, version or behaviour change, and the release
