@@ -18,6 +18,11 @@
   minutes (was per minute). Profile switches cancel a pending return. Stopping
   and recovering are announced. Verified in an isolated NVDA with an injected
   failing helper; this does not fix any engine crash.
+- Documentation: explain that the Pipe Organ failures and the brief Alex
+  silence after switching were Mac voice-pack issues (text encoding, one-frame
+  first render) fixed in those packs, add troubleshooting for per-voice output
+  format and start-up silence, and correct the claim that volume 0 mutes every
+  voice.
 - Output format labels now say that fixed rates are converted by XP and can
   sound harsher, and recommend Voice default. Measured on XP, converting the
   22.05 kHz Mac voices to 44.1 or 48 kHz adds false high frequencies only

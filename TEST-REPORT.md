@@ -1,5 +1,30 @@
 # Beta qualification
 
+## Voice-pack findings after live use — 2026-09-22
+
+These are fixes in the separately maintained Mac (Panthera-based) XP voice
+packs used for testing, not in the bridge; they are recorded here because the
+bridge's diagnostics found them.
+
+- Pipe Organ fallback recurred live. The bridge's text-free failure shape
+  showed 59 characters with 17 non-ASCII letters; the engine host logged the
+  same native fault as before. Source review found the packs' SAPI adapter sent
+  UTF-8 to an engine that reads MacRoman. The packs now encode MacRoman
+  exactly as their NVDA driver does. All 26 Mac voices render and 180
+  interruptions pass afterwards; whether the crash is gone is being confirmed
+  in normal use, because the crash was not reproduced deliberately.
+- Alex was sometimes silent right after switching voices. The engine log
+  showed a freshly started Snow Leopard or Lion host answering its first
+  utterance with one frame (2 bytes) and success, then the same text rendering
+  normally. The packs now render such an utterance once more. Each Alex voice
+  passed the bridge burst probe from a fresh host afterwards; the one-frame case
+  did not occur during that test, so the retry is confirmed only as harmless.
+- The development VM's audio driver was switched from DirectSound to Windows
+  Audio Session (the AC97 device is unchanged), following the Windows default
+  device as before.
+- AT&T Natural Voices remain audible at volume zero in plain XP as well; this
+  is engine behaviour, not a bridge defect, and is not addressed here.
+
 ## Output format and volume quality — 2026-09-22
 
 On the development XP VM, Pipe Organ, Alex and Fred (Leopard XP; the Panthera

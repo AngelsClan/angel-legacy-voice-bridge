@@ -37,9 +37,13 @@ not restart the user's active NVDA. Failure records include numeric request,
 length, queue, voice-slot and HRESULT data, never utterance text. Backlog records
 also distinguish bridge-selected from local-synth speech.
 
-A separate asynchronous Pipe Organ engine error remains under investigation.
-Passing recovery tests does not establish its original cause or lift the release
-hold. Keep dependable local speech available.
+A separate asynchronous Pipe Organ engine error was traced to the Mac voice
+pack used in testing, not to the bridge: that pack's SAPI adapter sent text to
+Apple's engine as UTF-8 while the engine reads MacRoman, so non-English letters
+arrived as garbage. The voice pack now encodes MacRoman; whether this ends the
+crashes is being confirmed in normal use. The bridge's text-free "Failure text
+shape" record is what exposed the pattern. This does not lift the release hold.
+Keep dependable local speech available.
 
 ### Switching voices after an installation
 
@@ -270,7 +274,7 @@ Gestures dialog. The usual NVDA+Control+S synthesizer dialog remains available.
 | Mirror local NVDA speech to XP | Send speech to XP as well as your active local synth. Turning off cancels mirrored speech immediately. Two voices can overlap and differ in timing. Off by default. |
 | Mirror/test voice | A voice discovered from XP; stored using its SAPI token ID, not its changing list position. |
 | Mirror/test rate | 0–100, mapped to SAPI's -10 to +10 rate. 50 is SAPI normal. Voice engines interpret speed differently. |
-| Mirror/test volume | 0–100; 0 is muted. Independent of Windows/VM mixer volume. |
+| Mirror/test volume | 0–100. 0 silences most voices, but some engines (for example AT&T Natural Voices) stay audible at volume zero, in plain XP too. Independent of Windows/VM mixer volume. |
 | Set XP playback mixer to 100% when adjusting bridge volume | Optional, off by default. On connection, Apply/Test, or a bridge synth volume adjustment, request XP's preferred output's master and Wave playback levels at 100%. Speech is still controlled by the bridge volume. Affects other XP sounds; does not unmute, alter recording gain or change the host mixer. Disabling does not restore old levels. Status reports full, partial or unavailable support. |
 | XP output format | Voice default (recommended), or 16, 22.05, 44.1 or 48 kHz, 16-bit mono. Apply affects subsequent utterances; Test uses the current selection. Connection status shows the format SAPI reports after speech starts. Higher rates cannot add detail to an old low-rate voice, and a fixed rate makes XP's SAPI convert the voice's output: measured on XP, converting the 22.05 kHz Mac voices to 44.1 or 48 kHz added false high frequencies only 21–27 dB below the voice, which can sound harsh or metallic. Use Voice default for the best sound. A low bridge volume (for example 20) also costs detail; prefer a higher bridge volume and lower the volume elsewhere. Unsupported engine/device formats can fail and trigger fallback. |
 | Use local eSpeak if the bridge synthesizer disconnects | Restore local speech after a detected failure. On by default. Detection is not instantaneous. |
@@ -467,6 +471,16 @@ logs. XP's Speech control panel can verify that its installed voices work.
 Connected but silent: test XP sounds, its default sound device, the hypervisor
 audio output, volume/mute, and a different SAPI5 voice. The pipe carries text,
 not audio, so a successful connection cannot prove speakers are audible.
+
+Silent only for a moment after switching to a voice, then fine: that is the
+voice engine starting up, not the bridge. It was seen with the Mac Alex voice
+packs, whose engine sometimes answered its first utterance with a single silent
+frame and no error; those packs now render such an utterance once more.
+
+Harsh or metallic sound: set **XP output format** to Voice default. Voices do
+not all prefer the same setting; the format is shared by every bridge voice, so
+change it in the synthesizer settings ring when you change to a voice that
+sounds better with another format.
 
 Slow/stuck: restore local speech, stop the test, close/reopen the XP helper and
 reconnect. VM CPU load, driver quality and legacy engine startup affect delay.
