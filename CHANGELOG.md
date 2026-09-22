@@ -2,6 +2,37 @@
 
 ## 0.1.2-dev2 — completion recovery, release still on hold
 
+- Clear abandoned NVDA speech/index queues before falling back to local speech,
+  automatically returning to the bridge, or disabling an active bridge synth.
+  A reconnect does not make lost indexes valid again. Preserve deliberate local
+  synth/profile changes. Add numeric failure snapshots and recovery diagnostics.
+- Reproduced the old fallback leaving 602 pending sequences in isolated NVDA;
+  the candidate clears them and completes subsequent local speech. The separate
+  Pipe Organ asynchronous E_FAIL trigger is not yet reproduced or proven fixed.
+- Automatic return now requires a verified render: a fixed check phrase, sent
+  at volume zero in the original voice, must reach its final bookmark. It is
+  inaudible only on voices that honour SAPI volume; some XP voices do not, and
+  real XP audibility of the check is untested. A reconnected pipe or a
+  listed voice is no longer enough. Checks back off from 5 to 60 seconds and
+  stop after 12 attempts or 15 minutes. Returns are limited to three per ten
+  minutes (was per minute). Profile switches cancel a pending return. Stopping
+  and recovering are announced. Verified in an isolated NVDA with an injected
+  failing helper; this does not fix any engine crash.
+- Mirroring under heavy announcement traffic: when XP falls 64 utterances
+  behind, drop the oldest waiting mirrored utterance instead of cancelling all
+  mirrored speech and logging a warning each time. The periodic progress record
+  counts dropped utterances. The bridge synthesizer's own queue is unchanged.
+- Automatic return stays off by default. Add an optional command to turn it
+  on or off (no default key; assign one in Input gestures), which announces the
+  new state; an open settings panel follows it. Document how to enable it.
+  Settings text no longer calls the check silent. About shows 0.1.2-dev2.
+- Resolve a fresh SAPI token when switching voices. Recreate SpVoice and retry
+  once only when speech is synchronously rejected with ERROR_KEY_DELETED after
+  an installer replaces the selected registration. Retain local-speech fallback
+  for other failures; never replay an accepted utterance.
+- Add bounded helper-side, text-free HRESULT diagnostics and optional numeric
+  host logging. Add live disposable-token replacement and voice-switch probes.
+
 - Check nonblocking SAPI completion after draining events, so a missing stream
   end event cannot leave an already-finished utterance waiting indefinitely.
 - Preserve bookmark order, cancellation generations and paused speech. Check

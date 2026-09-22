@@ -1,5 +1,170 @@
 # Beta qualification
 
+## Heavy announcement traffic — 2026-09-22
+
+Isolated NVDA 2026.2 (fresh profile, unseen desktop, eSpeak volume 0) against
+the private fake helper speaking two utterances per second, while five
+announcements per second plus a 200-event burst arrived, as on a busy server.
+NVDA's own queue is expected to grow in that situation; the bridge must not
+fail because of it.
+
+- Bridge selected, 180 s: 1,090 announcements, 346 spoken, NVDA queue peak
+  1,492, bridge queue peak 1, no fallback, no reconnect, no failed utterance,
+  no memory growth. NVDA's cancel cleared everything in 0.20 s and new speech
+  completed immediately.
+- Mirroring with local eSpeak, 120 s: 1,885 announcements, bridge queue capped
+  at 64, local synth unchanged, cancel cleared in 0.19 s. The old behaviour
+  cancelled all mirrored speech seven times. Rerun with drop-oldest mirroring:
+  1,885 announcements, 241 spoken, bridge queue capped at 64, zero cancel-all
+  events, no fallback, reconnect or memory growth, cancel cleared in 0.20 s.
+  The bridge-selected phase repeated its earlier result. Fake helper only; not
+  a measurement of real XP voices or of the Qt client itself.
+
+## Verified automatic return — 2026-09-22
+
+Automatic return previously switched back as soon as the pipe reconnected and
+the original voice token was listed. A crashed engine host can leave both intact.
+The return now requires a completed render of a fixed check phrase, sent at
+volume zero in the original voice, confirmed by its final bookmark.
+
+Volume-zero measurement on the XP VM (2026-09-22): every installed SAPI 5
+voice (29) rendered the exact check phrase to 22 kHz WAV files with XML volume
+100 and 0; no audio was played. Microsoft Sam and all 26 Panthera voices gave
+peak 0 (all-zero samples) at volume 0. AT&T DTNV 1.4 Mike16 and Crystal16 gave
+peak about 5,060 at volume 0 versus about 28,450 at 100 (about 18%), and the same
+with SpVoice.Volume = 0, so their check phrase is audible. A future helper
+option could render check utterances to a memory stream instead of the audio
+device, making them silent for every vendor; not implemented. Other limits: backoff from 5 to
+60 seconds, 12 checks or 15 minutes maximum, three returns per ten minutes,
+cancellation on profile switch, and spoken outcomes.
+
+- 138 unit tests pass (122 previous plus 16 recovery tests: handshake-only,
+  volume-0 fixed check request, delayed recovery, bounded failing checks, timeouts,
+  cancelled checks, stale callbacks, total window, idle wait, lost connection,
+  profile change, return cap with announcement, escalating first wait, repeated
+  failure cycle, disabling during a check, another local synth, plus plugin
+  registration of the profile-switch handler).
+- Real NVDA 2026.2, isolated on an unseen desktop with a fresh profile (eSpeak
+  volume 0) and a private fake helper that fails or succeeds on command:
+  A delayed recovery (one failed check, verified return in about 16.5 s, voice
+  and rate restored, notice spoken through the bridge); B manual eSpeak during
+  fallback respected, no further checks; C another local synth respected;
+  D profile switch keeping eSpeak cancels the return; E turning auto-return off
+  respected; F return cap enforced after repeated failures. The fake helper is
+  not the XP engine; this verifies NVDA-side behaviour only.
+- A harness defect in the first runs held a settings section across a profile
+  switch; writes through it did not reach the live configuration. The add-on
+  itself always fetches settings fresh.
+- No XP, voice-pack, helper or installed add-on change. The owner's NVDA was not
+  touched. This does not fix or explain the native MacinTalk crash.
+
+## Further XP engine investigation — 2026-09-22
+
+The updated bridge was already installed for the latest reported failure.
+Its log confirms reset-before-fallback ran and eSpeak loaded. Separately, the
+voice host recorded a native access violation during phoneme/stress processing;
+the exact triggering input and underlying compatibility defect remain unresolved.
+
+An independent 1,200-request, nonplaying Pipe Organ session passed. A real-bridge
+180-interruption run exposed XP's legacy SPERR_AUDIO_STOPPED in the engine log:
+the voice adapter had mistaken normal cancellation for engine failure. The
+Classic voice pack, maintained separately, now accepts both normal stop codes.
+A targeted actual-XP regression failed twice before the change and passed after;
+the unexpected-stop code still fails, and subsequent speech recovers. All 26
+registered Panthera voice renders produced nonzero PCM after installation.
+The installed Classic fix then passed 180 varied-timing interruptions plus next
+speech; its final 181 engine records contain 180 cancellations and zero failures.
+This is not evidence that the separate native crash is fixed. No NVDA restart,
+automatic bridge activation, or accessibility release approval was performed.
+
+## Pipe Organ failure and abandoned fallback queue — 2026-09-22
+
+The host and XP logs correlate an asynchronous SAPI failure (stage 7,
+HRESULT 0x80004005, Pipe Organ, 48000 Hz) with local eSpeak fallback. NVDA's
+process stayed running. The XP helper accepted a new session afterward. This
+does not prove a native process crash, nor establish what caused E_FAIL.
+
+The host log showed roughly 15,000 pending NVDA sequences at fallback, later
+over 31,000, while the bridge itself was idle. Source review found that changing
+synthesizers without cancelling NVDA speech leaves old indexes outstanding.
+DONE alone is insufficient. NVDA's normal profile-change path explicitly
+cancels speech before changing synths; the bridge now follows that contract.
+
+- Real NVDA 2026.2, fresh muted profiles on a separate, never-shown desktop:
+  old installed add-on plus injected session failure left 602 pending sequences
+  and one active index after eSpeak loaded. The corrected candidate left zero
+  pending sequences/indexes and completed a subsequent local-speech request.
+- The first harness attempt omitted synth selection because Python optimization
+  removes assert expressions. It was invalid and is not counted. The corrected
+  harness uses explicit checks and verified bridge selection in both runs.
+- Real XP Pipe Organ: ten completed synthetic punctuation, apostrophe,
+  Cyrillic/emoji and longer-message cases at 48000 Hz, rate 16, volume 20.
+- Follow-up: five mixed-control utterances also passed. Each changed rate,
+  volume and pitch inside one accepted stream and completed both bookmarks in
+  order. This did not reproduce the asynchronous E_FAIL either. A final helper
+  connection/catalog check passed; VM audio output was verified on afterward.
+- Real XP Pipe Organ: sixty queued requests across default/48000 Hz formats;
+  all bookmarks completed in order, twenty deliberately omitted bookmarks were
+  recovered. Twenty rapid cancellations and empty/bookmark-only speech passed.
+  Largest inter-completion gaps were 0.938 and 1.016 seconds respectively.
+- 122 unit/adapter tests passed, including reset-before-switch, already
+  reconnected failure, fallback disabled, profile-change preservation, and
+  failure diagnostics that never contain the queued speech text.
+
+The exact Pipe Organ E_FAIL has not recurred in these synthetic tests. Numeric
+XP engine diagnostics were enabled on the test installation (Diagnostics=1,
+not text-recording level 2); the historical event predates those deeper engine
+records. Do not infer the original engine cause from a generic HRESULT.
+
+Only the isolated test children were closed by the bounded harness. The user's
+NVDA was neither restarted nor replaced. The bridge remains disabled, the VM
+remains running, and its audio output is restored after testing. This candidate
+does not lift the accessibility release hold or require user reproduction.
+
+## Voice-pack reinstall / immediate fallback — 2026-09-21
+
+The user log recorded `batch-speak-failed` twice while changing from Alex to
+Agnes, followed by bridge disconnects. It did not contain the original HRESULT;
+this does not establish an NVDA process crash. An isolated real-XP reproduction
+using one disposable copy of a voice registration returned the same fixed error
+with HRESULT 0x800703FA at Speak: registry key marked for deletion. Installers
+can delete/recreate a token while the long-running helper or SpVoice retains it.
+This is a demonstrated cause consistent with the incident, not a recovered
+historical HRESULT or proof that every previously reported freeze is resolved.
+
+- Before the fix: replacing the unselected catalog token reproduced fallback.
+- Fresh token selection fixed that case, but was insufficient for an engine
+  already cached inside SpVoice. A fresh SpVoice on this specific synchronous
+  rejection, with a single retry, fixed the selected-voice case too.
+- Replacement with the voice already selected passed; recovery NOTICE count,
+  bookmark 7, DONE and 48000 Hz output were verified.
+- Pause injected immediately before COMMIT survived replacement recovery.
+  There was no bookmark/completion during six seconds paused, and exactly one
+  expected recovery followed by successful completion after resume.
+- 58 completed voice transitions passed: all 29 installed voices forward and
+  backward at fixed 48000 Hz, protocol rate 16 and volume 80.
+- The currently installed, unchanged add-on transport passed 29 interrupted
+  voice transitions with the new helper. Tests waited for COMMIT acknowledgement
+  before cancellation; early queue-only attempts are not counted as that test.
+- 118 host unit/adapter/contract tests passed, including numeric-only SAPIERROR
+  logging and recovery notices that cannot complete speech or revive old indexes.
+- All 29 real voices passed the five output-format checks on the recovery
+  candidate. That initial overall quality probe then timed out on an obsolete
+  disposable alias, not one of the real voices. The reinstall probe cleanup
+  now deletes its one alias AND waits for catalog removal; subsequent 29-voice
+  tests passed. Do not describe the first overall quality run as a clean pass.
+- Two independent read-only code reviews were performed. The first caught missing
+  pause preservation and insufficient diagnostic detail; those were addressed.
+  The second found no serious correctness issue and recommended the longer
+  pause observation used above. No claim of acoustic quality is made.
+
+VM audio output was disabled only during automated tests; active NVDA was
+neither restarted nor replaced. Only the XP helper was replaced. The helper
+repair is compatible with the installed protocol-2 add-on; the optional rebuilt
+add-on adds diagnostic detail. No voice data, credentials, VM or personal
+profile is packaged. No GitHub release is authorized by these test results;
+the separate accessibility-critical freeze investigation remains on hold.
+
 ## Skipped text / Microsoft Sam investigation — 2026-09-21
 
 Status: development 0.1.2-dev2, release hold unchanged. The exact intermittent

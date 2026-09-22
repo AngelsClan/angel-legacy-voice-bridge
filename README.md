@@ -23,6 +23,42 @@ first beta, not yet a replacement for a dependable primary screen reader.
 
 ## What is included
 
+### Speech recovery after an engine failure
+
+The September 22 candidate fixes a confirmed fallback defect: changing to eSpeak
+alone left NVDA waiting for indexes from the failed voice. The add-on now cancels
+the abandoned speech queue before switching. Pending old announcements are
+discarded, not replayed or falsely marked spoken. New local speech can proceed.
+The same reset applies to automatic return and disabling the active bridge.
+
+This fix requires the updated **add-on**. The already updated XP helper does not
+need replacing again. Install only at a safe restart time; development tools must
+not restart the user's active NVDA. Failure records include numeric request,
+length, queue, voice-slot and HRESULT data, never utterance text. Backlog records
+also distinguish bridge-selected from local-synth speech.
+
+A separate asynchronous Pipe Organ engine error remains under investigation.
+Passing recovery tests does not establish its original cause or lift the release
+hold. Keep dependable local speech available.
+
+### Switching voices after an installation
+
+The updated XP helper resolves voice registrations afresh when switching voices.
+It also recovers once from SAPI's specific "registry key marked for deletion"
+error when an installer replaces the voice already selected. This error could
+previously force a fallback to eSpeak even though the voice appeared in the list.
+Other failures still fall back to local speech; accepted speech is never replayed.
+This repair is in the XP helper and works with the existing protocol-2 add-on.
+Stop only the helper, replace its executable and start it again; no XP reboot or
+active NVDA restart is needed for this repair. The optional updated add-on adds
+more detailed error logging and should be installed only at a safe restart time.
+
+The helper keeps a bounded, approximately 1 MiB `bridge-sapi-errors.log` next to
+its executable, containing numeric error codes, operation stages and voice slots,
+not spoken text. A logged registry error may have been recovered successfully;
+consult the final request result rather than treating every record as a crash.
+This targeted repair does not resolve or lift the separate freeze investigation.
+
 ### Skipped text and voice-engine recovery
 
 This development update requires replacing the XP helper as well as the add-on
@@ -233,7 +269,7 @@ Gestures dialog. The usual NVDA+Control+S synthesizer dialog remains available.
 | Set XP playback mixer to 100% when adjusting bridge volume | Optional, off by default. On connection, Apply/Test, or a bridge synth volume adjustment, request XP's preferred output's master and Wave playback levels at 100%. Speech is still controlled by the bridge volume. Affects other XP sounds; does not unmute, alter recording gain or change the host mixer. Disabling does not restore old levels. Status reports full, partial or unavailable support. |
 | XP output format | Voice default (recommended), or 16, 22.05, 44.1 or 48 kHz, 16-bit mono. Apply affects subsequent utterances; Test uses the current selection. Connection status shows the format SAPI reports after speech starts. Higher rates cannot add detail to an old low-rate voice. Unsupported engine/device formats can fail and trigger fallback. |
 | Use local eSpeak if the bridge synthesizer disconnects | Restore local speech after a detected failure. On by default. Detection is not instantaneous. |
-| Automatically return to the bridge after recovery | Off by default. After automatic eSpeak fallback, return when the connection and original voice are available. Restore the bridge voice, rate, volume and pitch. A deliberate synth/local voice change, disabling the bridge, or turning this option off cancels the pending return. |
+| Automatically return to the bridge after recovery | Off by default. After automatic eSpeak fallback, return only after a short check phrase, sent at volume zero, renders in the original voice. Some XP voices remain audible at volume zero, so the phrase may be heard. Restore the bridge voice, rate, volume and pitch. A deliberate synth/local voice change, a profile switch, disabling the bridge, or turning this option off cancels the pending return. |
 | Connect / Cancel connection / Disconnect | One button, reflecting the current state. Connect applies the pipe immediately and starts retries. Cancel connection stops a pending connection; Disconnect stops an established one. Both stop mirroring, automatic startup and retries, preserving local speech or selecting eSpeak if needed. To reconnect, press Connect afterward. |
 | Refresh voices and status | Update the displayed information. The updated helper is scanned automatically about every five seconds while speech is idle; installing/removing SAPI5 voices no longer requires restarting it. Up to 128 distinct voice token IDs per helper run; not limited to Mike/Crystal. |
 | Test speech through XP | Send one synthetic phrase using the mirror/test controls. Use a local synth first. Mirroring is suspended during the test, preventing settings announcements from filling its queue. |
@@ -259,9 +295,22 @@ If the bridge is the active synthesizer and the connection unexpectedly fails,
 **Restore local eSpeak if bridge speech disconnects** is on by default. It
 switches to eSpeak after failure is detected, not the instant XP stops responding.
 In mirror mode the regular local voice remains active anyway. By default, select
-the bridge yourself after recovery. To return automatically, enable
-**Automatically return to the bridge after recovery**, Apply/OK and save settings.
-Both fallback and automatic return must be enabled for this round trip.
+the bridge yourself after recovery.
+
+### Turning on automatic return
+
+Automatic return is off by default. To turn it on, use either:
+
+- NVDA menu → Preferences → Settings → **Legacy Voice Bridge**, check
+  **Automatically return to the bridge after recovery**, then OK; or
+- the command **Turn automatic return to the bridge after recovery on or off**.
+  It has no key by default: assign one in NVDA menu → Preferences → Input
+  gestures, category **Angel Legacy Voice Bridge**. It says "Automatic return to
+  the bridge on" or "off". Turning it off also cancels any pending return.
+
+Both **Restore local eSpeak if bridge speech disconnects** and automatic return
+must be on for the round trip. Save your configuration if NVDA does not save it
+on exit.
 
 Transport I/O runs on a worker, not NVDA's UI thread. An unavailable helper is
 retried about once a second while connection is enabled. Only selecting/restoring the bridge synthesizer permits
@@ -277,13 +326,35 @@ safety timeouts, not promised response times.
 Speech queued before a disconnect/cancel is not replayed after recovery. An
 automatic return only follows this add-on's own eSpeak fallback, never an ordinary
 manual selection of local speech. Changing synthesizer or local voice cancels
-the pending return, as does disabling the bridge. A missing original XP voice
+the pending return, as do disabling the bridge, turning automatic return off,
+and switching NVDA configuration profile. A missing original XP voice
 keeps local speech active until that voice returns. Failed restoration stays on
 local speech instead of repeatedly switching. Pending recovery is not saved
 across NVDA restarts. The output format remains the shared bridge setting.
-At most three automatic returns are attempted in a rolling minute. If another
-failure follows those attempts, local speech stays selected; select the bridge
-manually after correcting the underlying problem.
+
+A reconnected pipe or a listed voice is not treated as recovery: a crashed
+voice engine can leave both intact. While eSpeak speaks normally, the add-on
+sends a short fixed check phrase to the original voice at volume zero, first
+after 5 seconds, then at doubling intervals up to one minute. Only a completed
+render, confirmed by its final bookmark, allows the return. Checks stop after
+12 attempts or 15 minutes, and NVDA says "Bridge voice did not recover. Staying
+on eSpeak." If eSpeak is mid-sentence when a check succeeds, the return waits
+up to 8 seconds for it to finish, then interrupts. A successful return says
+"Bridge voice recovered." through the restored voice. The check proves the
+engine rendered that phrase, not that later text cannot fail again.
+
+The check is inaudible only on voices that honour SAPI's volume setting. On
+the development XP VM, the check phrase rendered to files at volume zero was
+completely silent for Microsoft Sam and all 26 Panthera (Classic Mac and Alex)
+voices. AT&T Natural Voices Mike16 and Crystal16 ignored both the in-text and
+the base SAPI volume and stayed at about 18% of their normal peak, so with
+those voices you will briefly hear the check phrase from the VM. Other vendors
+are untested.
+
+At most three automatic returns happen in ten minutes, and each recent return
+lengthens the first wait (5, 10, then 20 seconds). If another failure follows
+those returns, NVDA says "Bridge failed repeatedly. Staying on eSpeak."; select
+the bridge manually after correcting the underlying problem.
 
 This is local inter-process communication, **not encryption or a security
 boundary against other software on the host**. Only trust the VM/helper and
