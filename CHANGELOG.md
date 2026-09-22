@@ -18,6 +18,9 @@
   minutes (was per minute). Profile switches cancel a pending return. Stopping
   and recovering are announced. Verified in an isolated NVDA with an injected
   failing helper; this does not fix any engine crash.
+- When bridge speech fails, also log a text-free "shape" of the failed
+  utterance (character-class counts, `[[`/`]]` counts, word counts) to help
+  identify which kinds of text trigger legacy engine crashes.
 - Mirroring under heavy announcement traffic: when XP falls 64 utterances
   behind, drop the oldest waiting mirrored utterance instead of cancelling all
   mirrored speech and logging a warning each time. The periodic progress record

@@ -83,6 +83,11 @@ NVDA user-configuration directory. The logger runs even when bridge speech is
 disabled, so local-speech operation can be compared without connecting to XP.
 It records lifecycle events, numeric backlog/progress counters, and code
 locations when NVDA's main thread fails to process a heartbeat for three seconds.
+When bridge speech fails, a "Failure text shape" record adds counts describing
+the failed utterance: digits, letters, spaces, ASCII punctuation, non-ASCII
+characters, `[[` and `]]` pairs, words and the longest word's length. These
+counts help find which kinds of text make a legacy engine fail; the words and
+characters themselves are never recorded.
 It does **not** record speech text, window titles, document contents, frame locals,
 passwords, or full source paths. Heartbeats are coalesced; repeated stall reports
 are limited to one every fifteen seconds.

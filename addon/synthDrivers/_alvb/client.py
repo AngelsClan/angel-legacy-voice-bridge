@@ -13,6 +13,22 @@ VOICE_REFRESH_INTERVAL = 5
 VOICE_REFRESH_TIMEOUT = 4
 
 
+def text_shape(items):
+    """Counts that describe an utterance without revealing it, for finding
+    which kinds of text make a legacy engine fail. Never words or characters."""
+    text = "".join(item.text for item in items if isinstance(item, Speech))
+    words = text.split()
+    return ("digits=%d letters=%d spaces=%d ascii_punctuation=%d non_ascii=%d "
+            "double_open_brackets=%d double_close_brackets=%d words=%d longest_word=%d" % (
+                sum(character.isdigit() for character in text),
+                sum(character.isalpha() for character in text),
+                sum(character.isspace() for character in text),
+                sum(character.isascii() and not character.isalnum() and not character.isspace() for character in text),
+                sum(not character.isascii() for character in text),
+                text.count("[["), text.count("]]"), len(words),
+                max((len(word) for word in words), default=0)))
+
+
 class BridgeClient:
     def __init__(self, pipe_name=DEFAULT_PIPE, callback=None, transport_factory=None, wait_for=None, quality=0, logger=None):
         # NVDA filters INFO from third-party loggers. Its adapter supplies the
@@ -62,6 +78,7 @@ class BridgeClient:
         self._commands = deque()
         self._active = None
         self._active_details = (0, 0, 0, 0, 0)
+        self._active_shape = ""
         self._request_id = 0
         self._session = ""
         self._pending_done = False
@@ -183,6 +200,8 @@ class BridgeClient:
                     self.generation, self._active[1] if self._active else 0,
                     len(self._queue), len(self._pending_indexes), elapsed,
                     slot, characters, quality, rate, volume)
+                if self._active and self._active_shape:
+                    self.log.warning("Failure text shape: request=%d %s", self._active[1], self._active_shape)
             self.connected = False
             self._connected_event.clear()
             self.status = reason
@@ -344,11 +363,13 @@ class BridgeClient:
         frames = deque(utterance_frames(session, generation, active[1], items, quality))
         indexes = deque(item.index for item in items if isinstance(item, Bookmark))
         limit = 120 + sum(len(item.text) * .5 for item in items if isinstance(item, Speech))
+        shape = text_shape(items)
         with self._lock:
             if self._active and self._active[:2] == active[:2] and not self._stop.is_set():
                 self._frames = frames
                 self._pending_indexes = indexes
                 self._active_limit = limit
+                self._active_shape = shape
                 first_speech = next((item for item in items if isinstance(item, Speech)), None)
                 self._active_details = (
                     first_speech.voice if first_speech else -1,

@@ -85,6 +85,24 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn("Private sentinel", repr(self.client.log.mock_calls))
         self.assertFalse(self.client._queue)
 
+    def test_failure_records_text_shape_but_never_text(self):
+        from unittest.mock import Mock
+        from _alvb.client import text_shape
+        self.client.close()
+        self.client._stop.clear()
+        self.client.connected = True
+        self.client.log = Mock()
+        secret = "Sentinel’s [[ 12 ]] $3.50"
+        self.client._active = (2, 19, time.monotonic())
+        self.client._active_shape = text_shape([Speech(secret, 4)])
+        self.client._disconnect("sapi-engine-failed")
+        shape = self.client.log.warning.call_args_list[1].args
+        self.assertEqual(shape[:2], ("Failure text shape: request=%d %s", 19))
+        self.assertIn("digits=5 ", shape[2])
+        self.assertIn("non_ascii=1 ", shape[2])
+        self.assertIn("double_open_brackets=1 double_close_brackets=1 ", shape[2])
+        self.assertNotIn("Sentinel", repr(self.client.log.mock_calls))
+
     def test_token_recovery_notice_does_not_finish_or_replay_speech(self):
         from unittest.mock import Mock
         self.client.close()
