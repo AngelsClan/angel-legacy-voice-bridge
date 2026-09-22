@@ -96,8 +96,11 @@ It does **not** record speech text, window titles, document contents, frame loca
 passwords, or full source paths. Heartbeats are coalesced; repeated stall reports
 are limited to one every fifteen seconds.
 Code locations can include module/function names of other installed add-ons.
-This labelled diagnostic build enables logging by default; a public release
-needs an explicit diagnostics preference before the release hold is lifted.
+Logging is controlled by **Write text-free diagnostics log** in the Legacy
+Voice Bridge settings. It is on by default while the release is on hold.
+Turning it off stops writing immediately after OK or Apply, without a restart;
+if it is off from the start, no log file is created. Existing log files are not
+deleted automatically.
 
 Disk writes happen on a separate daemon thread with a bounded 512-record queue.
 A slow disk drops diagnostic records instead of blocking speech. Idle backlog
@@ -153,9 +156,9 @@ not a tested/supported platform; contributors are welcome to qualify it.
 The build produces:
 
 1. `dist/XP Bridge/AngelLegacyVoiceBridge.exe` — copy this into XP.
-2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.2-dev1.nvda-addon` — diagnostic
+2. `dist/NVDA Add-on/AngelLegacyVoiceBridge-0.1.2-dev2.nvda-addon` — diagnostic
    candidate for isolated testing, **not** a cleared primary-speech update.
-3. `dist/AngelLegacyVoiceBridge-0.1.2-dev1-source.zip` — readable Python and native
+3. `dist/AngelLegacyVoiceBridge-0.1.2-dev2-source.zip` — readable Python and native
    helper C++ source, build script, tests and documentation. No VM or voices.
 
 Historical GitHub Releases provide the `.nvda-addon`, standalone XP `.exe` and
@@ -279,6 +282,7 @@ Gestures dialog. The usual NVDA+Control+S synthesizer dialog remains available.
 | XP output format | Voice default (recommended), or 16, 22.05, 44.1 or 48 kHz, 16-bit mono. Apply affects subsequent utterances; Test uses the current selection. Connection status shows the format SAPI reports after speech starts. Higher rates cannot add detail to an old low-rate voice, and a fixed rate makes XP's SAPI convert the voice's output: measured on XP, converting the 22.05 kHz Mac voices to 44.1 or 48 kHz added false high frequencies only 21–27 dB below the voice, which can sound harsh or metallic. Use Voice default for the best sound. A low bridge volume (for example 20) also costs detail; prefer a higher bridge volume and lower the volume elsewhere. Unsupported engine/device formats can fail and trigger fallback. |
 | Use local eSpeak if the bridge synthesizer disconnects | Restore local speech after a detected failure. On by default. Detection is not instantaneous. |
 | Automatically return to the bridge after recovery | Off by default. After automatic eSpeak fallback, return only after a short check phrase, sent at volume zero, renders in the original voice. Some XP voices remain audible at volume zero, so the phrase may be heard. Restore the bridge voice, rate, volume and pitch. A deliberate synth/local voice change, a profile switch, disabling the bridge, or turning this option off cancels the pending return. |
+| Write text-free diagnostics log | On by default during the release hold. Records timings, queue counts and error codes (never speech text or window titles) in `angelLegacyVoiceBridge-diagnostics.log` in the NVDA configuration folder. Takes effect immediately after OK or Apply. |
 | Connect / Cancel connection / Disconnect | One button, reflecting the current state. Connect applies the pipe immediately and starts retries. Cancel connection stops a pending connection; Disconnect stops an established one. Both stop mirroring, automatic startup and retries, preserving local speech or selecting eSpeak if needed. To reconnect, press Connect afterward. |
 | Refresh voices and status | Update the displayed information. The updated helper is scanned automatically about every five seconds while speech is idle; installing/removing SAPI5 voices no longer requires restarting it. Up to 128 distinct voice token IDs per helper run; not limited to Mike/Crystal. |
 | Test speech through XP | Send one synthetic phrase using the mirror/test controls. Use a local synth first. Mirroring is suspended during the test, preventing settings announcements from filling its queue. |

@@ -59,6 +59,9 @@ class BridgePanel(SettingsPanel):
         self.autoReturn.SetValue(values["autoReturn"])
         self._autoReturn_value = values["autoReturn"]
         helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, check the previous voice with a short phrase at volume zero and return only after it renders again. Some XP voices stay audible at volume zero, so the check phrase may be heard. Checks back off and stop after 15 minutes. Manual synth or profile changes and Disconnect cancel the pending return."))
+        self.diagnostics = helper.addItem(wx.CheckBox(self, label="Write text-free dia&gnostics log"))
+        self.diagnostics.SetValue(values["diagnostics"])
+        helper.addItem(wx.StaticText(self, label="Records timings, queue counts and error codes in angelLegacyVoiceBridge-diagnostics.log in NVDA's configuration folder, never speech text or window titles. Helps diagnose speech loss. Takes effect immediately after OK or Apply."))
         helper.addItem(wx.StaticText(self, label="Emergency: NVDA+Shift+F11 disables the bridge now and restores local speech if necessary. Voice discovery updates automatically after connection."))
         self.status = helper.addLabeledControl("Connection status:", wx.TextCtrl, style=wx.TE_READONLY)
         self.buttons = {}
@@ -249,11 +252,13 @@ class BridgePanel(SettingsPanel):
                            ("mirror", self.mirror.GetValue()), ("mirrorRate", self.rate.GetValue()),
                            ("mirrorVolume", self.volume.GetValue()), ("fallback", self.fallback.GetValue()),
                            ("autoReturn", self.autoReturn.GetValue()),
+                           ("diagnostics", self.diagnostics.GetValue()),
                            ("fullXPVolume", self.fullXPVolume.GetValue()),
                            ("quality", QUALITY_VALUES[self.quality.GetSelection()])):
             values[key] = value
         if self.voice.GetSelection() >= 0:
             values["mirrorVoice"] = self.voice_tokens[self.voice.GetSelection()]
+        service.refresh_diagnostics_preference()
         if not wanted_active:
             service.disable()
             return

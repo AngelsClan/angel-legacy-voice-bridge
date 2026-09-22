@@ -18,7 +18,7 @@ class Settings:
     def __init__(self):
         self.values = dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, pipe=r"\\.\pipe\AngelLegacySpeech-test",
                            mirror=True, mirrorVoice="token", mirrorRate=50,
-                           mirrorVolume=100, fallback=True)
+                           mirrorVolume=100, fallback=True, diagnostics=True)
 
     def __getitem__(self, key):
         return self.values[key]
@@ -121,7 +121,7 @@ class AdapterTests(unittest.TestCase):
         self.service = module("service", settings=lambda: self.settings, client=self.client,
                               ensure_client=Mock(return_value=self.client), stop=Mock(),
                               start_diagnostics=Mock(), stop_diagnostics=Mock(),
-                              listeners=[], testing=False, disable=Mock(), finish_test=Mock(), arm_recovery=Mock(), clear_recovery=Mock(),
+                              listeners=[], testing=False, disable=Mock(), finish_test=Mock(), arm_recovery=Mock(), clear_recovery=Mock(), refresh_diagnostics_preference=Mock(),
                               diagnostics=Mock(return_value=Mock()), speech_backlog_counts=Mock(return_value=(30000, 1, 0)))
         self.handler = module("synthDriverHandler", SynthDriver=Base,
                               getSynth=Mock(return_value=types.SimpleNamespace(name="espeak")),
@@ -175,7 +175,7 @@ class AdapterTests(unittest.TestCase):
     def panel(self):
         panel = self.plugin.BridgePanel()
         for name, value in dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, pipe=self.settings["pipe"], mirror=False,
-                                rate=60, volume=70, fallback=True, voice=0).items():
+                                rate=60, volume=70, fallback=True, diagnostics=True, voice=0).items():
             setattr(panel, name, Control(value))
         panel.voice_tokens = ["token"]
         panel.onRefresh = Mock()
@@ -223,6 +223,13 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(panel.autoReturn.value)
         panel.onSave()
         self.assertTrue(self.settings["autoReturn"])
+
+    def test_saving_diagnostics_preference_applies_it_at_once(self):
+        panel = self.panel()
+        panel.diagnostics.value = False
+        panel.onSave()
+        self.assertFalse(self.settings["diagnostics"])
+        self.service.refresh_diagnostics_preference.assert_called_once_with()
 
     def test_disabled_panel_can_save_recovery_preferences_without_connecting(self):
         panel = self.panel()

@@ -7,7 +7,7 @@ from collections import deque
 from logHandler import log
 from .client import BridgeClient, DEFAULT_PIPE
 from .dispatch import MainThreadDispatch
-from .diagnostics import DiagnosticLog, DisabledDiagnosticLog, speech_backlog_counts
+from .diagnostics import DiagnosticLog, DisabledDiagnosticLog, SwitchableLog, speech_backlog_counts
 
 SECTION = "angelLegacyVoiceBridge"
 SPEC = {
@@ -22,7 +22,9 @@ SPEC = {
     "autoReturn": "boolean(default=False)",
     "fullXPVolume": "boolean(default=False)",
     "quality": "integer(default=0)",
+    "diagnostics": "boolean(default=True)",
 }
+diagnostics_enabled = True
 client = None
 retiring_worker = None
 retiring_workers = []
@@ -42,6 +44,7 @@ def _diagnostic_tick(event, data):
     """Called on NVDA's main thread even when local speech is selected."""
     global last_backlog_log, last_backlog_sample, last_backlog_counts, diagnostic_failure_reported
     now = time.monotonic()
+    refresh_diagnostics_preference()
     sink = diagnostics()
     if sink.failed and not diagnostic_failure_reported:
         diagnostic_failure_reported = True
@@ -69,6 +72,7 @@ def start_diagnostics():
     global monitor_stopped
     if monitor_stopped is not None:
         return
+    refresh_diagnostics_preference()
     monitor_stopped = threading.Event()
     stopped = monitor_stopped
     dispatch = MainThreadDispatch(
@@ -92,17 +96,31 @@ def stop_diagnostics():
     # the logger still owned by an active synthesizer's transport worker.
 
 
+def _open_diagnostic_log():
+    try:
+        from NVDAState import WritePaths
+        from pathlib import Path
+        opened = DiagnosticLog(Path(WritePaths.configDir) / "angelLegacyVoiceBridge-diagnostics.log")
+        opened.info("Bridge diagnostics started; speech text and window titles are never recorded")
+        return opened
+    except Exception as error:
+        log.warning("Legacy Voice Bridge diagnostics unavailable: %s", type(error).__name__)
+        return DisabledDiagnosticLog()
+
+
+def refresh_diagnostics_preference():
+    """Main thread only: copy the preference into a flag any thread can read."""
+    global diagnostics_enabled
+    try:
+        diagnostics_enabled = bool(settings()["diagnostics"])
+    except Exception:
+        diagnostics_enabled = True
+
+
 def diagnostics():
     global diagnostic_log
     if diagnostic_log is None:
-        try:
-            from NVDAState import WritePaths
-            from pathlib import Path
-            diagnostic_log = DiagnosticLog(Path(WritePaths.configDir) / "angelLegacyVoiceBridge-diagnostics.log")
-            diagnostic_log.info("Bridge diagnostics started; speech text and window titles are never recorded")
-        except Exception as error:
-            diagnostic_log = DisabledDiagnosticLog()
-            log.warning("Legacy Voice Bridge diagnostics unavailable: %s", type(error).__name__)
+        diagnostic_log = SwitchableLog(_open_diagnostic_log, lambda: diagnostics_enabled)
     return diagnostic_log
 
 

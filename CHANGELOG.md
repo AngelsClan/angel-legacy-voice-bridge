@@ -18,6 +18,10 @@
   minutes (was per minute). Profile switches cancel a pending return. Stopping
   and recovering are announced. Verified in an isolated NVDA with an injected
   failing helper; this does not fix any engine crash.
+- Add **Write text-free diagnostics log** to the settings (on by default during
+  the release hold). It applies immediately after OK or Apply, from every
+  thread, without a restart; with it off from the start no log file is
+  created. This was a stated prerequisite for lifting the release hold.
 - Documentation: explain that the Pipe Organ failures and the brief Alex
   silence after switching were Mac voice-pack issues (text encoding, one-frame
   first render) fixed in those packs, add troubleshooting for per-voice output

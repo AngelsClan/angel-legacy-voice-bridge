@@ -52,9 +52,27 @@ class ServiceTests(unittest.TestCase):
         with patch.dict(sys.modules, {"NVDAState": state}):
             with patch.object(self.service, "DiagnosticLog", side_effect=RuntimeError("no threads")):
                 sink = self.real_diagnostics()
-                self.assertTrue(sink.failed)
                 sink.info("Test record")
+                self.assertTrue(sink.failed)
                 self.assertIs(self.real_diagnostics(), sink)
+
+    def test_diagnostics_preference_off_writes_nothing_and_creates_no_file(self):
+        self.values["diagnostics"] = False
+        self.service.refresh_diagnostics_preference()
+        state = types.SimpleNamespace(WritePaths=types.SimpleNamespace(configDir="unused"))
+        with patch.dict(sys.modules, {"NVDAState": state}), patch.object(self.service, "DiagnosticLog") as factory:
+            sink = self.real_diagnostics()
+            sink.warning("Failure snapshot: %d", 1)
+            factory.assert_not_called()
+            self.values["diagnostics"] = True
+            self.service.refresh_diagnostics_preference()
+            sink.warning("Failure snapshot: %d", 2)
+            factory.assert_called_once()
+            factory.return_value.warning.assert_called_once_with("Failure snapshot: %d", 2)
+            self.values["diagnostics"] = False
+            self.service.refresh_diagnostics_preference()
+            sink.info("Ignored")
+            factory.return_value.info.assert_called_once()  # only the start-up line
 
     def test_monitor_start_failure_can_be_retried(self):
         with patch.object(self.service.MainThreadDispatch, "start_monitor", side_effect=RuntimeError("no threads")):

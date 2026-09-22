@@ -9,10 +9,30 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "addon/synthDrivers"))
-from _alvb.diagnostics import DiagnosticLog, speech_backlog_counts
+from _alvb.diagnostics import DiagnosticLog, SwitchableLog, speech_backlog_counts
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_switchable_log_is_created_lazily_and_follows_the_flag(self):
+        enabled = [False]
+        inner = Mock(failed=False, dropped=3)
+        factory = Mock(return_value=inner)
+        sink = SwitchableLog(factory, lambda: enabled[0])
+        sink.info("Off %d", 1)
+        factory.assert_not_called()
+        self.assertEqual((sink.failed, sink.dropped), (False, 0))
+        enabled[0] = True
+        sink.warning("On %d", 2)
+        inner.warning.assert_called_once_with("On %d", 2)
+        self.assertEqual(sink.dropped, 3)
+        enabled[0] = False
+        sink.warning("Off again")
+        inner.warning.assert_called_once()
+
+    def test_switchable_log_survives_a_failing_factory(self):
+        sink = SwitchableLog(Mock(side_effect=RuntimeError("no threads")), lambda: True)
+        sink.info("Record")
+        self.assertTrue(sink.failed)
     def test_transient_write_failure_recovers_on_later_record(self):
         original = DiagnosticLog._write_line
         attempts = []

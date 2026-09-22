@@ -20,6 +20,49 @@ class DisabledDiagnosticLog:
         pass
 
 
+class SwitchableLog:
+    """The user's "write diagnostics" preference, honoured on every record.
+
+    `enabled` must be cheap and thread-safe: the transport worker logs too, so
+    it reads a cached flag rather than NVDA's configuration. The real log (and
+    its writer thread and file) is created only the first time a record is
+    written while enabled, so a user who turns diagnostics off before it ever
+    runs gets no file at all.
+    """
+    def __init__(self, factory, enabled):
+        self._factory = factory
+        self._enabled = enabled
+        self._log = None
+
+    def _target(self):
+        if not self._enabled():
+            return None
+        if self._log is None:
+            try:
+                self._log = self._factory()
+            except Exception:
+                self._log = DisabledDiagnosticLog()
+        return self._log
+
+    def info(self, message, *args):
+        target = self._target()
+        if target is not None:
+            target.info(message, *args)
+
+    def warning(self, message, *args):
+        target = self._target()
+        if target is not None:
+            target.warning(message, *args)
+
+    @property
+    def failed(self):
+        return bool(self._log is not None and self._log.failed)
+
+    @property
+    def dropped(self):
+        return self._log.dropped if self._log is not None else 0
+
+
 class DiagnosticLog:
     """Only the writer thread opens, rotates, writes and flushes log files.
 

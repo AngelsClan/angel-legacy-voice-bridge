@@ -1,5 +1,15 @@
 # Beta qualification
 
+## Diagnostics preference — 2026-09-22
+
+147 unit tests pass, including the switchable logger (lazy creation, follows
+the preference per record, survives a failing log) and the service path (off
+from the start creates no log; turning on and off takes effect at once). In an
+isolated NVDA 2026.2, the real settings panel opened on Legacy Voice Bridge,
+the checkbox was cleared and OK pressed: the setting saved, the log did not
+grow for 12 seconds, the reopened panel showed the saved value, and after
+turning it back on the log grew again within a minute.
+
 ## Voice-pack findings after live use — 2026-09-22
 
 These are fixes in the separately maintained Mac (Panthera-based) XP voice
