@@ -18,6 +18,10 @@
   minutes (was per minute). Profile switches cancel a pending return. Stopping
   and recovering are announced. Verified in an isolated NVDA with an injected
   failing helper; this does not fix any engine crash.
+- Output format labels now say that fixed rates are converted by XP and can
+  sound harsher, and recommend Voice default. Measured on XP, converting the
+  22.05 kHz Mac voices to 44.1 or 48 kHz adds false high frequencies only
+  21–27 dB below the voice.
 - When bridge speech fails, also log a text-free "shape" of the failed
   utterance (character-class counts, `[[`/`]]` counts, word counts) to help
   identify which kinds of text trigger legacy engine crashes.

@@ -1,5 +1,25 @@
 # Beta qualification
 
+## Output format and volume quality — 2026-09-22
+
+On the development XP VM, Pipe Organ, Alex and Fred (Leopard XP; the Panthera
+engine reports 22,050 Hz mono) rendered one ordinary English sentence to files
+at the engine's own 22.05 kHz and through SAPI conversion to 44.1 and 48 kHz,
+at XML volume 100 and 20. Nothing was played.
+
+| Voice | Energy above 11.025 kHz at 44.1 / 48 kHz | Volume 20 vs 100 at 22.05 kHz |
+| --- | --- | --- |
+| Pipe Organ | −25.4 / −25.4 dB | 62.9 dB SNR after rescaling |
+| Alex | −21.2 / −21.1 dB | 63.2 dB |
+| Fred | −26.7 / −26.6 dB | 64.4 dB |
+
+The native files have no energy above 11.025 kHz, so everything there is
+conversion artefact (imaging), easily audible as harshness. Voice default avoids
+SAPI's conversion. Volume 20 loses about 30 dB of dynamic range compared with
+16-bit full scale. The labels now recommend Voice default. The VM's host audio
+driver was separately switched from DirectSound to Windows Audio Session (the
+AC97 controller is unchanged); listening comparison is pending.
+
 ## Heavy announcement traffic — 2026-09-22
 
 Isolated NVDA 2026.2 (fresh profile, unseen desktop, eSpeak volume 0) against
