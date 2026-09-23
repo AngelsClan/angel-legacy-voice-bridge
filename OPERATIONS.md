@@ -6,8 +6,9 @@ need [README.md](README.md);** nothing here is required for normal use.
 
 ## Boundaries and reasons
 
-Keep XP offline. A local virtual serial pipe carries speech requests, not audio;
-audio comes from XP's default output. Guest Additions are useful for launching
+Keep XP offline. A local virtual serial pipe carries speech requests and, on
+the NVDA or Both route, captured PCM back to the host. Other XP sounds still
+come from XP's default output. Guest Additions are useful for launching
 and copying the helper, but they are not the speech transport. No guest password
 is stored by the add-on. Never publish passwords, voice licenses, VM disks,
 personal NVDA profiles, or speech-containing logs.
@@ -25,11 +26,18 @@ shortcuts, change autologon, start XP, or change VM hardware automatically.
    XP VM by its actual name/UUID; never assume the example name matches.
 3. Run `VBoxManage showvminfo "Windows XP"`. Verify COM1, host-server pipe, and
    guest network adapters disabled. Do not print private VM configuration in a
-   public report. If hardware needs changing, ask before a normal guest shutdown.
+   public report. Change serial hardware only with the VM powered off: a live
+   UART mode toggle can make COM1 disappear from XP until a graceful restart.
 4. Confirm a local NVDA synthesizer works. Never replace/restart someone's active
    NVDA or interrupt their only speech path to perform an unattended test.
 5. Find the installed helper path and release version. There must be only one
    helper using COM1 and one client using the pipe.
+
+On the tested VirtualBox build, a short open-and-close of the host pipe can
+consume its single connection without delivering a HELLO to XP. Do not use a
+bare pipe-open probe before the actual client. If the helper receives no HELLO
+and later attempts report PIPE_BUSY, close test clients and restore the VM's
+serial backend with a graceful XP restart; keep networking disabled.
 
 ## Manual startup in XP
 

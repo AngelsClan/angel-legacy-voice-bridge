@@ -1,6 +1,46 @@
 # Release notes
 
-## Current: 0.1.2-dev2 — development build, release on hold
+## Current: 0.1.2-dev3 — development build, release on hold
+
+Bridge speech can now play through XP speakers, NVDA's selected output device,
+or both. XP remains the voice host and its other sounds keep using XP audio.
+The chosen route is saved in the add-on's settings and is capability-gated, so
+an older XP helper continues using XP speakers. Replace the XP helper and
+add-on together before selecting an NVDA audio route.
+
+The XP helper captures SAPI PCM while preserving bookmarks, cancellation and
+completion. Real XP tests covered all three routes and five engines (Sam,
+Mike16, Crystal16, Vicki and Alex), including multiple utterances on one
+connection, pause and cancel. PCM was counted and discarded by a test player;
+audibility, quality and live NVDA performance still need owner listening.
+The isolated host test suite passed 172 tests before packaging.
+
+Optional automatic return after fallback now requires a silent check that
+actually produces non-silent PCM plus a real bookmark. The helper captures and
+discards that check on every route, including XP speakers: some AT&T voices
+remain audible at SAPI volume zero. Older helpers without this capability do
+not run the check. Automatic return remains off by default.
+
+**Public release remains on hold.** The original reported NVDA freeze and the
+separate Lion Pipe Organ stall are not proved fixed by this audio-routing work.
+The owner should install the finished add-on only when ready to test and keep
+a dependable local synthesizer available. No installer automatically changes
+the live NVDA synthesizer or restarts it.
+
+### Install this development pair
+
+1. In NVDA, select a local synthesizer and disconnect the bridge.
+2. In XP, stop the old helper and replace it with the supplied
+   `AngelLegacyVoiceBridge.exe`. Start the replacement.
+3. Install `AngelLegacyVoiceBridge-0.1.2-dev3.nvda-addon` and approve NVDA's
+   restart when it is safe.
+4. In the add-on settings, choose where XP bridge speech plays. `XP speakers`
+   is the default. Test `Send to NVDA` and `Both` while a local synthesizer
+   remains available for recovery.
+
+The packages are unsigned. See `TEST-REPORT.md` for test limits and hashes.
+
+## Previous: 0.1.2-dev2 — development build, release on hold
 
 **This is not a cleared public release.** An accessibility-critical NVDA freeze
 reported against 0.1.1 is still unexplained. Keep a dependable local

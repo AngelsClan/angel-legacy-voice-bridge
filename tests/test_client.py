@@ -4,11 +4,12 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import base64
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "addon/synthDrivers"))
 from _alvb.client import BridgeClient
-from _alvb.protocol import Speech, Bookmark, Silence
+from _alvb.protocol import Speech, Bookmark, Silence, utterance_frames
 
 
 class FakePipe:
@@ -67,6 +68,143 @@ def wait_until(condition, seconds=2):
 
 
 class ClientTests(unittest.TestCase):
+    def test_probe_never_queues_before_silent_capability(self):
+        self.client.connected = True
+        self.client._silent_probe_supported = False
+        self.assertFalse(self.client.enqueue([Speech("Voice check", 0, 10, 100, 10)], probe=True))
+        self.assertEqual(len(self.client._queue), 0)
+
+    def test_silent_probe_is_capability_gated_and_requires_signal(self):
+        self.client.close()
+        self.client.generation = 4
+        self.client._process_line(["CAPS", self.client._session, "silent-probe"])
+        frames = utterance_frames(self.client._session, 4, 9,
+                                  [Speech("Voice check", 0, 10, 0, 10), Bookmark(7)],
+                                  probe=True)
+        self.assertEqual(frames[0].decode("ascii").split("\t")[-1], "1\n")
+        self.client._active = (4, 9, time.monotonic())
+        self.client._audio_probe = True
+        request = 9
+        self.client._process_line(["PROBEAUDIO", self.client._session, "4", str(request), "400", "0"])
+        self.client._process_line(["PROBEAUDIO", self.client._session, "4", str(request), "400", "1"])
+        self.assertIn(("audioProduced", (4, 400, False)), self.events)
+        self.assertIn(("audioProduced", (4, 400, True)), self.events)
+
+    def test_both_requires_its_own_capability(self):
+        self.client.close()
+        self.client.connected = True
+        self.client._process_line(["CAPS", self.client._session, "audio-pcm"])
+        self.client.route = "both"
+        self.client._caps_deadline = time.monotonic() - 1
+        self.client._send_work(self.pipe)
+        self.assertNotIn(["ROUTE", self.client._session, "both"], self.pipe.sent)
+        self.assertIn("playing through XP", self.client.status)
+        self.client._process_line(["CAPS", self.client._session, "audio-both"])
+        self.client._send_work(self.pipe)
+        self.assertIn(["ROUTE", self.client._session, "both"], self.pipe.sent)
+
+    def test_switching_back_from_nvda_sends_xp_route(self):
+        self.client.close()
+        self.client.connected = True
+        self.client._audio_supported = True
+        self.client.route = "nvda"
+        self.client._route_active = "nvda"
+        self.client.set_route("xp")
+        self.client._send_work(self.pipe)
+        self.assertIn(["ROUTE", self.client._session, "xp"], self.pipe.sent)
+        self.client._process_line(["ROUTE", self.client._session, "xp"])
+        self.assertEqual(self.client._route_active, "xp")
+
+    def test_unsupported_both_returns_guest_to_xp(self):
+        self.client.close()
+        self.client.connected = True
+        self.client._audio_supported = True
+        self.client.route = "nvda"
+        self.client._route_active = "nvda"
+        self.client._caps_deadline = time.monotonic() - 1
+        self.client.set_route("both")
+        self.client._send_work(self.pipe)
+        self.assertIn(["ROUTE", self.client._session, "xp"], self.pipe.sent)
+        self.client._process_line(["ROUTE", self.client._session, "xp"])
+        self.assertEqual(self.client._route_active, "xp")
+        self.assertIn("unavailable", self.client.status)
+
+    def test_zero_offset_bookmark_waits_until_audio_start(self):
+        self.client.close()
+        audio = Mock()
+        self.client.audio = audio
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        session = self.client._session
+        self.client._process_line(["INDEX", session, "4", "9", "7", "0"])
+        audio.index.assert_not_called()
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "22050", "16", "1"])
+        self.assertEqual([call[0] for call in audio.method_calls], ["start", "index"])
+
+    def test_routed_audio_waits_for_playback_before_bookmark_and_completion(self):
+        self.client.close()
+        self.events.clear()
+        audio = Mock()
+        self.client.audio = audio
+        self.client.connected = True
+        self.client.route = "nvda"
+        self.client._process_line(["CAPS", self.client._session, "audio-pcm"])
+        self.client._send_work(self.pipe)
+        self.assertIn(["ROUTE", self.client._session, "nvda"], self.pipe.sent)
+        self.client._process_line(["ROUTE", self.client._session, "nvda"])
+        self.client._active = (4, 9, time.monotonic())
+        self.client.generation = 4
+        self.client._pending_indexes = deque([7])
+        self.client._pending_done = True
+        session = self.client._session
+        self.client._process_line(["INDEX", session, "4", "9", "7", "4"])
+        audio.index.assert_not_called()
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "22050", "16", "1"])
+        self.client._process_line(["AUDIO", session, "4", "9", "0",
+                                   base64.b64encode(b"\x01\x00\x02\x00").decode("ascii")])
+        self.client._process_line(["DONE", session, "4", "9"])
+        self.assertTrue(self.client.busy)
+        self.assertEqual(self.events, [])
+        audio.feed.assert_called_once_with(b"\x01\x00\x02\x00")
+        audio.index.assert_called_once_with(7)
+        audio.finish.assert_called_once()
+        self.client.audio_event("index", 7)
+        self.client.audio_event("done", None)
+        self.assertIsNone(self.client._audio_format)
+        self.client._active = (4, 10, time.monotonic())
+        self.client._process_line(["AUDIOFORMAT", session, "4", "10", "16000", "16", "1"])
+        self.assertEqual(self.client._audio_format.rate, 16000)
+        self.client._active = None
+        self.client._send_work(self.pipe)
+        self.assertEqual([event for event, _ in self.events], ["observedIndex", "index", "done"])
+
+    def test_routed_audio_rejects_wrong_sequence_without_releasing_speech(self):
+        self.client.close()
+        self.client.audio = Mock()
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        session = self.client._session
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "22050", "16", "1"])
+        with self.assertRaises(ValueError):
+            self.client._process_line(["AUDIO", session, "4", "9", "1", "AQACAA=="])
+        self.assertTrue(self.client.busy)
+
+    def test_late_audio_after_cancel_does_not_break_new_speech(self):
+        self.client.close()
+        self.client.audio = Mock()
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        self.client.cancel()
+        session = self.client._session
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "22050", "16", "1"])
+        self.client._process_line(["AUDIO", session, "4", "9", "0", "AQACAA=="])
+        self.client.audio.start.assert_not_called()
+        self.client.audio.feed.assert_not_called()
+
     def test_disconnect_records_counts_before_discarding_failed_request(self):
         from unittest.mock import Mock
         self.client.close()
@@ -204,6 +342,8 @@ class ClientTests(unittest.TestCase):
             self.client.enqueue([Speech("Synthetic event"), Bookmark(index)])
         wait_until(lambda: any(event == "done" for event, data in self.events), 5)
         self.assertEqual([data[1] for event, data in self.events if event == "index"], list(range(60)))
+        self.assertEqual([data[1] for event, data in self.events if event == "observedIndex"],
+                         [index for index in range(60) if index % 3 != 0])
         self.assertEqual(self.client._recovered_indexes, 20)
 
     def test_cancel_does_not_recover_indexes_from_old_done(self):
@@ -399,7 +539,7 @@ class ClientTests(unittest.TestCase):
             self.client.enqueue([Speech("Refused")])
         self.assertTrue(self.client.enqueue([Speech("Newest")], drop_oldest=True))
         with self.client._lock:
-            texts = [items[0].text for items in self.client._queue]
+            texts = [items[0][0].text for items in self.client._queue]
         self.assertEqual(len(texts), 64)
         self.assertEqual((texts[0], texts[-1]), ("Queued 1", "Newest"))
         self.assertEqual(self.client._dropped_utterances, 1)

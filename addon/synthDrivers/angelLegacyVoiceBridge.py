@@ -15,7 +15,7 @@ from ._alvb.sequence import SUPPORTED_COMMANDS, translate
 
 class SynthDriver(synthDriverHandler.SynthDriver):
     name = "angelLegacyVoiceBridge"
-    description = "Angel Legacy Voice Bridge (audio through XP)"
+    description = "Angel Legacy Voice Bridge"
     supportedSettings = (
         synthDriverHandler.SynthDriver.VoiceSetting(),
         synthDriverHandler.SynthDriver.RateSetting(),

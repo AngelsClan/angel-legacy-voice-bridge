@@ -179,6 +179,9 @@ class ServiceTests(unittest.TestCase):
     def arm(self, voice_tokens=None):
         source = self.service.ensure_client()
         source.connected = True
+        source.busy = False
+        source._route_active = "xp"
+        source._silent_probe_supported = True
         source.generation = 7
         source.enqueue.return_value = True
         source.voice_tokens = {0: "other-voice", 3: "original-voice"} if voice_tokens is None else voice_tokens
@@ -194,7 +197,8 @@ class ServiceTests(unittest.TestCase):
     def render(self, source):
         """Wait for the first check, then report its final bookmark."""
         self.advance(self.service.recovery.delay)
-        self.service._deliver(source, "index", (source.generation, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (source.generation, self.service.PROBE_INDEX))
+        self.service._deliver(source, "audioProduced", (source.generation, 400, True))
 
     def restorable(self):
         restored = types.SimpleNamespace(name="angelLegacyVoiceBridge", saveSettings=Mock())
@@ -222,8 +226,16 @@ class ServiceTests(unittest.TestCase):
         self.advance(5)
         speech, mark = source.enqueue.call_args.args[0]
         self.assertEqual((speech.text, speech.voice, speech.volume, speech.rate, speech.pitch),
-                         (self.service.PROBE_TEXT, 3, 0, 13, 9))
+                         (self.service.PROBE_TEXT, 3, 100, 13, 9))
         self.assertEqual(mark.index, self.service.PROBE_INDEX)
+
+    def test_old_helper_cannot_run_audible_recovery_check(self):
+        source = self.arm()
+        source._silent_probe_supported = False
+        self.advance(5)
+        source.enqueue.assert_not_called()
+        self.assertIsNone(self.service.recovery)
+        self.handler.setSynth.assert_not_called()
 
     def test_recovery_restores_original_voice_after_verified_render(self):
         source = self.arm()
@@ -237,6 +249,25 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(self.service.recovery)
         self.cancel_speech.assert_called_once()
         self.ui.message.assert_called_once_with("Bridge voice recovered.")
+
+    def test_routed_recovery_requires_pcm_and_playback_completion(self):
+        source = self.arm()
+        source._route_active = "nvda"
+        self.restorable()
+        self.advance(5)
+        self.service._deliver(source, "observedIndex", (7, self.service.PROBE_INDEX))
+        self.advance(1)
+        self.assertIsNone(self.service.recovery.verified_at)
+        source.busy = True
+        self.service._deliver(source, "audioProduced", (7, 400, False))
+        self.assertIsNone(self.service.recovery.verified_at)
+        self.service._deliver(source, "audioProduced", (7, 400, True))
+        self.assertIsNotNone(self.service.recovery.verified_at)
+        self.advance(1)
+        self.handler.setSynth.assert_not_called()
+        source.busy = False
+        self.advance(self.service.IDLE_WAIT)
+        self.handler.setSynth.assert_called_once_with("angelLegacyVoiceBridge")
 
     def test_delayed_recovery_after_failed_checks(self):
         source = self.arm()
@@ -252,7 +283,8 @@ class ServiceTests(unittest.TestCase):
         source.generation = 9
         self.advance(1)
         self.assertEqual(source.enqueue.call_count, 2)
-        self.service._deliver(source, "index", (9, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (9, self.service.PROBE_INDEX))
+        self.service._deliver(source, "audioProduced", (9, 400, True))
         self.advance(1)
         self.assertIs(self.handler.getSynth(), restored)
 
@@ -274,7 +306,7 @@ class ServiceTests(unittest.TestCase):
         self.advance(self.service.PROBE_TIMEOUT + 1)
         self.assertIsNone(self.service.recovery.probe_generation)
         self.assertEqual(self.service.recovery.delay, 10)
-        self.service._deliver(source, "index", (7, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (7, self.service.PROBE_INDEX))
         self.advance(1)
         self.handler.setSynth.assert_not_called()
 
@@ -283,7 +315,7 @@ class ServiceTests(unittest.TestCase):
         self.advance(5)
         source.generation = 8  # Mirroring or a test cancelled the silent check.
         self.advance(1)
-        self.service._deliver(source, "index", (8, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (8, self.service.PROBE_INDEX))
         self.advance(1)
         self.handler.setSynth.assert_not_called()
         self.assertIsNone(self.service.recovery.verified_at)
@@ -291,9 +323,18 @@ class ServiceTests(unittest.TestCase):
     def test_stale_callbacks_cannot_verify(self):
         source = self.arm()
         self.advance(5)
-        self.service._deliver(source, "index", (7, 12))
-        self.service._deliver(Mock(), "index", (7, self.service.PROBE_INDEX))
-        self.service.recovery_event(Mock(), "index", (7, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (7, 12))
+        self.service._deliver(Mock(), "observedIndex", (7, self.service.PROBE_INDEX))
+        self.service.recovery_event(Mock(), "observedIndex", (7, self.service.PROBE_INDEX))
+        self.advance(1)
+        self.assertIsNone(self.service.recovery.verified_at)
+        self.handler.setSynth.assert_not_called()
+
+    def test_reconstructed_bookmark_does_not_verify_recovery(self):
+        source = self.arm()
+        self.advance(5)
+        # The client emits ordinary index for a bookmark recovered from DONE.
+        self.service._deliver(source, "index", (7, self.service.PROBE_INDEX))
         self.advance(1)
         self.assertIsNone(self.service.recovery.verified_at)
         self.handler.setSynth.assert_not_called()
@@ -376,7 +417,7 @@ class ServiceTests(unittest.TestCase):
         self.advance(1)
         self.assertIsNone(self.service.recovery)
         self.values["autoReturn"] = True
-        self.service._deliver(source, "index", (7, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (7, self.service.PROBE_INDEX))
         self.advance(1)
         self.handler.setSynth.assert_not_called()
 
@@ -415,7 +456,7 @@ class ServiceTests(unittest.TestCase):
         self.advance(5)
         # NVDA creates a new eSpeak instance and notifies synthChanged.
         self.service.clear_recovery(synth=types.SimpleNamespace(name="espeak"))
-        self.service._deliver(source, "index", (7, self.service.PROBE_INDEX))
+        self.service._deliver(source, "observedIndex", (7, self.service.PROBE_INDEX))
         self.advance(10)
         self.handler.setSynth.assert_not_called()
         self.assertIsNone(self.service.recovery)

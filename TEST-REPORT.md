@@ -1,5 +1,47 @@
 # Beta qualification
 
+## 0.1.2-dev3 audio-route development qualification — 2026-09-23
+
+The host unit suite passed 172 tests after the XP, NVDA and Both routes,
+bounded PCM parsing/playback, capability gates and silent recovery proof were
+added. The helper's guest protocol suite passed 60 checks and 13 host interop
+checks. On a real offline XP VM, Claudius exercised nine consecutive
+utterances on one serial connection: NVDA route with Sam, Mike16, Crystal16,
+Vicki and Alex; Both with Sam and Mike16; XP speakers with Sam and Mike16.
+Bookmarks arrived on every utterance, and cancel and pause/resume passed.
+
+Measured captured audio reached the counting host player at 4.2–6.5 times
+real time on the NVDA route and 1.19–1.30 times on Both, where local playback
+sets the pace. An XP-only utterance sent no audio frames to the host. A silent
+XP-route recovery check rendered 158,180 non-silent PCM bytes in 0.31 seconds,
+compared with 3.64 seconds for the same ordinary XP sound-card utterance, then
+ordinary playback resumed. These measurements use synthetic text and a host
+player that counts and discards PCM. They do not establish how the audio sounds
+through NVDA or XP speakers.
+
+On this final dev3 build, 172 host unit tests, the package boundary/hash
+checker, and a real wx settings-control smoke test passed. An isolated NVDA
+2026.2 session on a separate desktop loaded the add-on and completed the
+diagnostics-preference scenario; it never switched or restarted the owner's
+active NVDA. A second real XP check on the dev3 binary verified all three
+capabilities and an XP-route recovery probe. At volume 100 it produced a real
+bookmark and 114,516 non-silent PCM bytes, while delivering zero audio frames
+to the host player. Ordinary XP speech immediately afterward completed through
+the sound card. The volume-0 check returned all-zero PCM, which is why the
+shipped recovery check now uses volume 100 inside the discard-only probe.
+
+The XP VM had networking disabled and audio enabled throughout the final test.
+The previous installed helper was saved privately before the dev3 executable
+was copied into its installed path. The owner must still test actual audibility
+and quality of the new NVDA/Both routes. The original NVDA freeze reported
+against 0.1.1 and the separate Lion Pipe Organ stall remain open, so public
+release remains on hold.
+
+Artifacts (SHA-256): add-on
+`51588ffbff32bc81bd5e1881c54a97eb0312de47ea476ebc0dfd9b7588d96899`,
+XP helper `29414d232d0bd95c47ec1409b57065068dd0309910c95a53aa360f212c168dbb`.
+The source ZIP's current hash is in its adjacent `.sha256` file.
+
 This is the evidence log, newest first. Each section records what was actually
 tested on a given day, with the result and the limits of that result; a section
 is never rewritten once its work is done. Statements of the form "not

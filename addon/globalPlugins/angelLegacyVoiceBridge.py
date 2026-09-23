@@ -47,18 +47,23 @@ class BridgePanel(SettingsPanel):
         self.volume.SetValue(values["mirrorVolume"])
         self.fullXPVolume = helper.addItem(wx.CheckBox(self, label="Set XP playback &mixer to 100% when adjusting bridge volume"))
         self.fullXPVolume.SetValue(values["fullXPVolume"])
+        self.speechRoute = helper.addLabeledControl(
+            "Where XP bridge speech &plays:", wx.Choice,
+            choices=["XP speakers", "Send to NVDA", "Both XP and NVDA"])
+        self.speechRoute.SetSelection({"xp": 0, "nvda": 1, "both": 2}.get(values["speechRoute"], 0))
+        helper.addItem(wx.StaticText(self, label="The default is XP speakers. Sending speech to NVDA uses its selected audio output; other XP sounds keep playing in the VM. Requires the updated XP helper."))
         helper.addItem(wx.StaticText(self, label="Optional; off by default. Connect, Apply or Test can immediately raise XP master and Wave playback levels, including other XP sounds. Does not unmute XP or change host volume. Bridge volume still controls speech. Turning this off or canceling the dialog does not restore old mixer levels."))
         self.quality = helper.addLabeledControl("XP output &format:", wx.Choice, choices=list(QUALITY_LABELS))
         selected = values["quality"]
         self._quality_value = selected
         self.quality.SetSelection(QUALITY_VALUES.index(selected) if selected in QUALITY_VALUES else 0)
-        helper.addItem(wx.StaticText(self, label="Applies to bridge and mirrored speech after Apply. Higher sample rates cannot restore detail missing from an old voice. Output comes from XP, not NVDA's audio device."))
+        helper.addItem(wx.StaticText(self, label="Applies to bridge and mirrored speech after Apply. Higher sample rates cannot restore detail missing from an old voice."))
         self.fallback = helper.addItem(wx.CheckBox(self, label="Restore local eSpeak if bridge speech &disconnects"))
         self.fallback.SetValue(values["fallback"])
         self.autoReturn = helper.addItem(wx.CheckBox(self, label="Automatically return to the bridge after &recovery"))
         self.autoReturn.SetValue(values["autoReturn"])
         self._autoReturn_value = values["autoReturn"]
-        helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, check the previous voice with a short phrase at volume zero and return only after it renders again. Some XP voices stay audible at volume zero, so the check phrase may be heard. Checks back off and stop after 15 minutes. Manual synth or profile changes and Disconnect cancel the pending return."))
+        helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, capture and discard a short check phrase from the previous voice; return only after a real bookmark and non-silent audio. This requires the updated XP helper. Checks back off and stop after 15 minutes. Manual synth or profile changes and Disconnect cancel the pending return."))
         self.diagnostics = helper.addItem(wx.CheckBox(self, label="Write text-free dia&gnostics log"))
         self.diagnostics.SetValue(values["diagnostics"])
         helper.addItem(wx.StaticText(self, label="Records timings, queue counts and error codes in angelLegacyVoiceBridge-diagnostics.log in NVDA's configuration folder, never speech text or window titles. Helps diagnose speech loss. Takes effect immediately after OK or Apply."))
@@ -184,6 +189,7 @@ class BridgePanel(SettingsPanel):
         values["active"] = True
         values["pipe"] = self.pipe.GetValue().strip()
         values["quality"] = QUALITY_VALUES[self.quality.GetSelection()]
+        values["speechRoute"] = ("xp", "nvda", "both")[self.speechRoute.GetSelection()]
         values["fullXPVolume"] = self.fullXPVolume.GetValue()
         self.active.SetValue(True)
         service.reconnect()
@@ -214,6 +220,7 @@ class BridgePanel(SettingsPanel):
         service.testing = True
         client.cancel()
         client.quality = QUALITY_VALUES[self.quality.GetSelection()]
+        client.set_route(("xp", "nvda", "both")[self.speechRoute.GetSelection()])
         client.full_xp_volume = self.fullXPVolume.GetValue()
         client.request_full_volume()
         if not client.enqueue([Speech("Angel Legacy Voice Bridge is ready. This sound comes from Windows XP.", index,
@@ -228,7 +235,7 @@ class BridgePanel(SettingsPanel):
         self.onRefresh(None)
 
     def onAbout(self, event):
-        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev2\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Audio comes from XP, not NVDA's output device. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
+        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev3\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Bridge speech can play through XP speakers, NVDA, or both. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
 
     def isValid(self):
         name = self.pipe.GetValue().strip()
@@ -248,12 +255,21 @@ class BridgePanel(SettingsPanel):
         changed = name != values["pipe"]
         if values["mirror"] and not self.mirror.GetValue() and service.client:
             service.client.cancel()
+        route_control = getattr(self, "speechRoute", None)
+        if route_control is not None:
+            selected_route = ("xp", "nvda", "both")[route_control.GetSelection()]
+        else:
+            try:
+                selected_route = values["speechRoute"]
+            except KeyError:
+                selected_route = "xp"
         for key, value in (("active", wanted_active), ("enabled", self.enabled.GetValue()), ("pipe", name),
                            ("mirror", self.mirror.GetValue()), ("mirrorRate", self.rate.GetValue()),
                            ("mirrorVolume", self.volume.GetValue()), ("fallback", self.fallback.GetValue()),
                            ("autoReturn", self.autoReturn.GetValue()),
                            ("diagnostics", self.diagnostics.GetValue()),
                            ("fullXPVolume", self.fullXPVolume.GetValue()),
+                           ("speechRoute", selected_route),
                            ("quality", QUALITY_VALUES[self.quality.GetSelection()])):
             values[key] = value
         if self.voice.GetSelection() >= 0:
@@ -266,6 +282,7 @@ class BridgePanel(SettingsPanel):
             service.stop()
         client = service.ensure_client()
         client.quality = values["quality"]
+        client.set_route(values["speechRoute"])
         client.full_xp_volume = values["fullXPVolume"]
         client.request_full_volume()
 

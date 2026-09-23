@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "addon/synthDrivers"))
 
 class Settings:
     def __init__(self):
-        self.values = dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, pipe=r"\\.\pipe\AngelLegacySpeech-test",
+        self.values = dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, speechRoute="xp", pipe=r"\\.\pipe\AngelLegacySpeech-test",
                            mirror=True, mirrorVoice="token", mirrorRate=50,
                            mirrorVolume=100, fallback=True, diagnostics=True)
 
@@ -268,6 +268,14 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(self.settings["mirrorVolume"], 70)
         self.assertFalse(self.settings["mirror"])
         self.client.cancel.assert_called_once()
+
+    def test_route_choice_is_saved_and_applied_to_connected_client(self):
+        panel = self.panel()
+        panel.speechRoute = Mock()
+        panel.speechRoute.GetSelection.return_value = 1
+        panel.onSave()
+        self.assertEqual(self.settings["speechRoute"], "nvda")
+        self.client.set_route.assert_called_once_with("nvda")
 
     def test_invalid_pipe_has_accessible_validation(self):
         panel = self.panel()

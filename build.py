@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.1.2-dev2"
+VERSION = "0.1.2-dev3"
 
 
 def find_tools():

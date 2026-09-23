@@ -22,6 +22,7 @@ SPEC = {
     "autoReturn": "boolean(default=False)",
     "fullXPVolume": "boolean(default=False)",
     "quality": "integer(default=0)",
+    "speechRoute": "string(default='xp')",
     "diagnostics": "boolean(default=True)",
 }
 diagnostics_enabled = True
@@ -159,8 +160,9 @@ MAX_PROBES = 12
 RECOVERY_WINDOW = 900
 PROBE_TIMEOUT = 15
 IDLE_WAIT = 8
-# Fixed synthetic text only; never user speech. Volume 0 makes the engine do
-# its full front-end and synthesis work while the adapter writes silent PCM.
+# Fixed synthetic text only; never user speech. The capable XP helper captures
+# and discards its PCM on every route, so ordinary volume proves the engine
+# can produce audible samples without sending them to a sound device.
 PROBE_TEXT = "Voice check, one two three."
 PROBE_INDEX = 2147483000
 
@@ -179,6 +181,8 @@ class Recovery:
         self.probe_generation = None
         self.probe_started = 0
         self.verified_at = None
+        self.bookmark_verified = False
+        self.audio_verified = False
 
 
 def _profile_identity():
@@ -231,6 +235,8 @@ def _abandon(reason, announce=True):
 def _probe_failed(state, reason):
     state.probe_generation = None
     state.verified_at = None
+    state.bookmark_verified = False
+    state.audio_verified = False
     state.delay = min(MAX_PROBE_DELAY, state.delay * 2)
     state.next_probe = time.monotonic() + state.delay
     diagnostics().info("Recovery check failed: reason=%s checks=%d next_seconds=%d",
@@ -242,12 +248,18 @@ def recovery_event(source, event, data):
     state = recovery
     if state is None or state.source is not source or state.probe_generation is None:
         return
-    if event == "index" and tuple(data) == (state.probe_generation, PROBE_INDEX):
+    if event == "disconnected":
+        _probe_failed(state, "disconnected")
+        return
+    if event == "observedIndex" and tuple(data) == (state.probe_generation, PROBE_INDEX):
+        state.bookmark_verified = True
+    elif (event == "audioProduced" and data[0] == state.probe_generation
+          and data[1] > 0 and data[2]):
+        state.audio_verified = True
+    if state.bookmark_verified and state.audio_verified:
         state.probe_generation = None
         state.verified_at = time.monotonic()
         diagnostics().info("Recovery check rendered: checks=%d", state.probes)
-    elif event == "disconnected":
-        _probe_failed(state, "disconnected")
 
 
 def _start_probe(state, now):
@@ -258,12 +270,14 @@ def _start_probe(state, now):
         return
     from .protocol import Bookmark, Speech
     state.probes += 1
+    state.bookmark_verified = False
+    state.audio_verified = False
     state.probe_started = now
     generation = source.generation
-    items = [Speech(PROBE_TEXT, index, max(0, min(20, round(voice["rate"] / 5))), 0,
+    items = [Speech(PROBE_TEXT, index, max(0, min(20, round(voice["rate"] / 5))), 100,
                     max(0, min(20, round(voice["pitch"] / 5)))), Bookmark(PROBE_INDEX)]
     try:
-        accepted = source.enqueue(items)
+        accepted = source.enqueue(items, probe=True)
     except ValueError:
         accepted = False
     if accepted:
@@ -300,13 +314,22 @@ def try_recovery():
             _abandon("checks")
         elif (now >= state.next_probe and source.connected
               and state.voice_settings["voice"] in source.voice_tokens.values()):
-            _start_probe(state, now)
+            if not getattr(source, "_silent_probe_supported", False):
+                # Volume zero is audible in some XP SAPI engines. Never run a
+                # recovery check through an older helper that cannot capture
+                # and discard the PCM independently of the normal audio route.
+                _abandon("silent-probe-unsupported")
+            else:
+                _start_probe(state, now)
         return
     # Verified. Prefer not to cut off eSpeak mid-sentence, but do not wait long.
     pending, indexes, callbacks = speech_backlog_counts()
     if (pending > 0 or indexes > 0) and now - state.verified_at < IDLE_WAIT:
         return
-    if not source.connected or state.voice_settings["voice"] not in source.voice_tokens.values():
+    if source.busy:
+        return
+    if (not source.connected
+            or state.voice_settings["voice"] not in source.voice_tokens.values()):
         _probe_failed(state, "lost-after-check")
         return
     voice_settings, fallback_synth = state.voice_settings, state.fallback_synth
@@ -346,7 +369,7 @@ def _deliver(source, event, data):
         return
     if event == "connected" and not source.connected:
         return
-    if event == "index" and data[0] != source.generation:
+    if event in ("index", "observedIndex", "audioProduced") and data[0] != source.generation:
         return
     if event == "done" and data != source.generation:
         return
@@ -356,7 +379,7 @@ def _deliver(source, event, data):
     global testing
     if event in ("done", "disconnected"):
         finish_test()
-    if event in ("index", "disconnected"):
+    if event in ("observedIndex", "audioProduced", "disconnected"):
         recovery_event(source, event, data)
     for listener in tuple(listeners):
         try:
@@ -376,7 +399,12 @@ def ensure_client(wait=0):
             available = discover_pipes()
             if DEFAULT_PIPE not in available and len(available) == 1:
                 values["pipe"] = available[0]
+        from .audio import AudioPlayback
         source = BridgeClient(values["pipe"], wait_for=retiring_worker, quality=values["quality"], logger=diagnostics())
+        selected_route = values.get("speechRoute", "xp")
+        source.route = selected_route if selected_route in ("xp", "nvda", "both") else "xp"
+        source.audio = AudioPlayback(source.audio_event,
+                                     lambda: config.conf["audio"]["outputDevice"])
         source.full_xp_volume = values["fullXPVolume"]
         # Saved synthesizers load before wx.App exists. NVDA's event queue is
         # available during startup and delivers inside the core pump, rather
@@ -391,6 +419,7 @@ def ensure_client(wait=0):
         try:
             source.start()
         except Exception:
+            source.audio.close()
             client = None
             raise
     if wait:

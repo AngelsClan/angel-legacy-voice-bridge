@@ -39,6 +39,13 @@ The helper maps rate and pitch to -10 through +10. Voice index is 0–127.
 | XP → host | ENDVOICES |
 | XP → host, optional capability | CAPS, session, voice-refresh |
 | XP → host, optional capability | CAPS, session, xp-volume |
+| XP → host, optional capability | CAPS, session, audio-pcm |
+| XP → host, optional capability | CAPS, session, audio-both |
+| XP → host, optional capability | CAPS, session, silent-probe |
+| Host → XP, idle only | ROUTE, session, xp-or-nvda-or-both |
+| XP → host | ROUTE, session, applied-route |
+| XP → host, before routed audio | AUDIOFORMAT, session, generation, requestID, rate, bits, channels |
+| XP → host, per routed PCM chunk | AUDIO, session, generation, requestID, sequence, base64PCM |
 | Host → XP, idle only | REFRESH, session |
 | XP → host | VOICESUNCHANGED, session |
 | XP → host | VOICESRETRY, session |
@@ -49,15 +56,17 @@ The helper maps rate and pitch to -10 through +10. Voice index is 0–127.
 | Host → XP | CANCEL, session, generation |
 | XP → host | CANCELLED, session, generation |
 | Host → XP | PAUSE, session, 0-or-1 |
-| Host → XP | BEGIN, session, generation, requestID, voiceIndex, outputFormat |
+| Host → XP | BEGIN, session, generation, requestID, voiceIndex, outputFormat, optional silentProbe=1 |
 | Host → XP | PART, session, generation, requestID, rate, volume, pitch, spell, textHex |
 | Host → XP | MARK, session, generation, requestID, index |
 | Host → XP | BREAK, session, generation, requestID, milliseconds (0–10000) |
 | Host → XP | COMMIT, session, generation, requestID |
 | XP → host | ACK, session, generation, requestID |
 | XP → host | INDEX, session, generation, requestID, index |
+| XP → host, routed speech | INDEX, session, generation, requestID, index, PCMByteOffset |
 | XP → host | FORMAT, session, sampleRate, bits, channels |
 | XP → host | DONE, session, generation, requestID |
+| XP → host, silent check | PROBEAUDIO, session, generation, requestID, PCMBytes, nonSilent=0-or-1 |
 | XP → host | ERROR, session, generation, requestID, fixed-error-code |
 | XP → host, optional diagnostic | SAPIERROR, session, generation, requestID, stage, unsignedHRESULT, voiceIndex, outputFormat |
 
@@ -67,7 +76,30 @@ style tags; transport boundaries do not introduce prosody changes. Output format
 is 0 for voice default, or 16000/22050/44100/48000 for 16-bit mono PCM. FORMAT is
 the format reported by SAPI, not an audio-quality measurement.
 
+A recovery check sends the optional seventh `BEGIN` field only after the helper
+advertises `silent-probe`. The helper then captures its PCM in memory on every
+route, discards the sound, and reports the byte count and a non-silence flag in
+`PROBEAUDIO` before `DONE`. This is necessary because some XP SAPI voices remain
+audible at volume zero. Older helpers keep the six-field `BEGIN` format and
+automatic return stops without running an audible check. A final bookmark and
+non-silent PCM are both required before returning from a fallback synthesizer.
+
 DONE follows SAPI's end-input-stream event, not a microphone measurement.
+When audio routing is active, the host waits for its output player's completion
+before it reports the bookmark or releases the utterance to NVDA. Audio frames
+are 16-bit mono or stereo PCM with at most 2,048 bytes before base64 encoding.
+Frame sequences start at zero for each utterance. The cumulative PCM byte offset
+on INDEX lets the host place bookmarks behind the corresponding audio. Audio
+format and frames are bound to the current session, generation and requestID;
+stale frames are ignored after cancellation. The host queues at most 32 MiB of
+unplayed PCM and disconnects safely if playback cannot keep up.
+
+`audio-pcm` permits `nvda`; `audio-both` separately permits `both`. A host
+that does not see the requested capability keeps speech on XP and reports that
+the selected route is unavailable. On `nvda`, XP does not play bridge speech
+locally. On `both`, XP plays the same captured PCM locally while forwarding it;
+other XP sounds are unchanged. A missing XP playback device produces the fixed
+error `local-playback-unavailable` rather than silently hanging.
 SAPI stream IDs reject events belonging to canceled utterances. Error request IDs may
 refer to the last request if a new request failed validation. The host treats
 a helper error as a session failure, discards its queue and reconnects.

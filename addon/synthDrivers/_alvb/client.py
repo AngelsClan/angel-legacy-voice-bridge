@@ -5,7 +5,8 @@ import time
 import uuid
 import logging
 
-from .protocol import Bookmark, LineReader, Speech, utterance_frames
+from .protocol import (Bookmark, LineReader, Speech, utterance_frames,
+                       parse_audio_format, parse_audio_frame)
 
 DEFAULT_PIPE = r"\\.\pipe\AngelLegacySpeech-XP"
 ACK_TIMEOUT = 4
@@ -39,6 +40,21 @@ class BridgeClient:
             transport_factory = Pipe
         self.pipe_name = pipe_name
         self.quality = quality
+        self.route = "xp"
+        self.audio = None
+        self._audio_supported = False
+        self._both_supported = False
+        self._silent_probe_supported = False
+        self._route_pending = False
+        self._route_started = 0
+        self._route_active = "xp"
+        self._audio_format = None
+        self._audio_sequence = 0
+        self._audio_bytes = 0
+        self._audio_probe = False
+        self._audio_failure = None
+        self._route_marks = deque()
+        self._caps_deadline = 0
         self.output_format = "Not reported yet"
         self.full_xp_volume = False
         self.mixer_status = "Helper support not reported"
@@ -122,6 +138,49 @@ class BridgeClient:
         if wait and threading.current_thread() is not self._thread:
             self._thread.join(timeout=2)
 
+    def set_route(self, route):
+        if route not in ("xp", "nvda", "both"):
+            raise ValueError("Invalid bridge route")
+        with self._lock:
+            if route == self.route:
+                return
+            self.route = route
+            self.cancel()
+            self._route_pending = False
+            self._route_started = 0
+
+    def audio_event(self, kind, value):
+        """Playback worker events. Never call NVDA directly from this thread."""
+        notifications = []
+        with self._lock:
+            if kind == "index" and self._active:
+                if value in self._pending_indexes:
+                    while self._pending_indexes.popleft() != value:
+                        pass
+                notifications.append(("observedIndex", (self._active[0], value)))
+                notifications.append(("index", (self._active[0], value)))
+            elif kind == "probe" and self._active and self._audio_probe:
+                notifications.append(("audioProduced", (self._active[0], value[0], value[1])))
+            elif kind == "done" and self._active:
+                recovered = list(self._pending_indexes)
+                self._pending_indexes.clear()
+                self._recovered_indexes += len(recovered)
+                self._completed_utterances += 1
+                self._active = None
+                self._waiting_ack = False
+                self._audio_format = None
+                self._audio_sequence = 0
+                self._audio_bytes = 0
+                self._route_marks.clear()
+                for index in recovered:
+                    notifications.append(("index", (self.generation, index)))
+            elif kind == "error":
+                self.log.warning("NVDA audio playback failed: error_type=%s", value)
+                self._audio_failure = "NVDA audio playback failed"
+                return
+        for event, data in notifications:
+            self._notify(event, data)
+
     def _notify(self, event, data):
         try:
             self.callback(event, data)
@@ -129,7 +188,7 @@ class BridgeClient:
             # A torn-down UI must not kill the transport worker. No payload log.
             self.log.warning("Bridge callback unavailable: event=%s error_type=%s", event, type(error).__name__)
 
-    def enqueue(self, items, drop_oldest=False):
+    def enqueue(self, items, drop_oldest=False, probe=False):
         """Queue one utterance. With drop_oldest, a full queue loses its oldest
         waiting utterance instead of refusing, so mirrored speech stays current
         when XP falls behind a busy stream of announcements."""
@@ -140,12 +199,16 @@ class BridgeClient:
         with self._lock:
             if not self.connected or self._stop.is_set():
                 return False
+            if probe and not self._silent_probe_supported:
+                # An old or still-handshaking helper would treat the check as
+                # ordinary audible XP speech. Never let it enter that path.
+                return False
             if len(self._queue) >= 64:
                 if not drop_oldest:
                     raise ValueError("Speech queue limit exceeded")
                 self._queue.popleft()
                 self._dropped_utterances += 1
-            self._queue.append(items)
+            self._queue.append((items, bool(probe)))
             self._enqueued_utterances += 1
             self._pending_done = True
         return True
@@ -169,6 +232,13 @@ class BridgeClient:
             self._pause_started = 0
             self._commands.clear()
             self._commands.append(("CANCEL", str(self.generation)))
+            self._audio_format = None
+            self._audio_sequence = 0
+            self._audio_bytes = 0
+            self._route_marks.clear()
+            self._audio_failure = None
+        if self.audio is not None:
+            self.audio.cancel()
 
     def pause(self, paused):
         with self._lock:
@@ -187,6 +257,8 @@ class BridgeClient:
             # Coalesce repeated pause toggles so control messages stay bounded.
             self._commands = deque(item for item in self._commands if item[0] != "PAUSE")
             self._commands.append(("PAUSE", "1" if paused else "0"))
+        if self.audio is not None and self._route_active != "xp":
+            self.audio.pause(bool(paused))
 
     def _disconnect(self, reason):
         with self._lock:
@@ -215,6 +287,13 @@ class BridgeClient:
             self._paused = False
             self._pause_started = 0
             self.generation += 1
+            self._route_pending = False
+            self._route_active = "xp"
+            self._audio_format = None
+            self._route_marks.clear()
+            self._audio_failure = None
+        if self.audio is not None:
+            self.audio.cancel()
         if was_connected:
             logger = self.log
             if self._stop.is_set():
@@ -242,6 +321,7 @@ class BridgeClient:
                 self._refresh_pending = False
                 self._last_refresh = time.monotonic()
                 self.connected = True
+                self._caps_deadline = time.monotonic() + .5
                 self.status = "Connected; audio plays through XP"
                 self._connected_event.set()
             if not was_connected:
@@ -260,6 +340,23 @@ class BridgeClient:
             if self.mixer_status == "Helper support not reported":
                 self.mixer_status = "Ready; not adjusted"
                 self.request_full_volume()
+        elif fields == ["CAPS", self._session, "audio-pcm"]:
+            self._audio_supported = True
+        elif fields == ["CAPS", self._session, "audio-both"]:
+            self._both_supported = True
+        elif fields == ["CAPS", self._session, "silent-probe"]:
+            self._silent_probe_supported = True
+        elif command == "ROUTE" and len(fields) == 3 and fields[1] == self._session:
+            with self._lock:
+                if self._route_pending and fields[2] == self._target_route():
+                    self._route_active = fields[2]
+                    self._route_pending = False
+                    self._route_started = 0
+                    self.status = ("Connected; requested audio route unavailable; playing through XP"
+                                   if self.route != self._route_active else
+                                   "Connected; audio plays through XP" if self.route == "xp"
+                                   else "Connected; bridge speech routes to " +
+                                   ("NVDA" if self.route == "nvda" else "XP and NVDA"))
         elif command == "MIXER" and len(fields) == 3 and fields[1] == self._session:
             self.mixer_status = {"OK": "Master and Wave at 100%", "PARTIAL": "Only some playback controls adjusted",
                                  "UNSUPPORTED": "Playback mixer could not be adjusted"}.get(fields[2], "Unknown result")
@@ -267,10 +364,53 @@ class BridgeClient:
                 self.log.warning("XP playback mixer adjustment incomplete")
         elif command == "PONG" and fields == ["PONG", self._session]:
             self._notify("health", None)
+        elif command == "AUDIOFORMAT" and len(fields) == 7 and fields[1] == self._session:
+            generation, request, audio_format = parse_audio_format(fields)
+            with self._lock:
+                if not self._active or (generation, request) != self._active[:2]:
+                    return  # Buffered reply for a canceled utterance.
+                valid = (self._audio_supported and self._route_active != "xp"
+                         and self._audio_format is None and self.audio is not None)
+                if not valid:
+                    raise ValueError("Unexpected audio format")
+                self._audio_format = audio_format
+                self._audio_sequence = 0
+                self._audio_bytes = 0
+                self.audio.start(audio_format, probe=self._audio_probe)
+                self._flush_route_marks()
+        elif command == "AUDIO" and len(fields) == 6 and fields[1] == self._session:
+            generation, request, sequence, data = parse_audio_frame(fields)
+            with self._lock:
+                if not self._active or (generation, request) != self._active[:2]:
+                    return
+                if (self._audio_format is None or sequence != self._audio_sequence
+                        or len(data) % (self._audio_format.channels * 2)):
+                    raise ValueError("Unexpected audio frame")
+                self.audio.feed(data)
+                self._audio_sequence += 1
+                self._audio_bytes += len(data)
+                self._flush_route_marks()
+        elif command == "PROBEAUDIO" and len(fields) == 6 and fields[1] == self._session:
+            generation, request, byte_count, has_signal = map(int, fields[2:])
+            if not (0 <= byte_count <= 64 * 1024 * 1024 and has_signal in (0, 1)):
+                raise ValueError("Invalid probe audio evidence")
+            with self._lock:
+                active_probe = (self._active and (generation, request) == self._active[:2]
+                                and self._audio_probe and self._silent_probe_supported)
+            if active_probe:
+                self._notify("audioProduced", (generation, byte_count, bool(has_signal)))
         elif command == "DONE" and len(fields) == 4 and fields[1] == self._session:
             recovered = []
             with self._lock:
                 if self._active and (int(fields[2]), int(fields[3])) == self._active[:2]:
+                    if self._route_active != "xp":
+                        if self._audio_format is None or self._audio_bytes == 0:
+                            raise ValueError("Routed speech produced no audio")
+                        if self._route_marks:
+                            raise ValueError("Audio ended before bookmark offset")
+                        self.audio.finish()
+                        self._last_receive = time.monotonic()
+                        return
                     # Some SAPI engines omit bookmarks, especially around empty
                     # text. NVDA advances its queue on indexes, not DONE alone.
                     # Actual completion is the only safe point to recover them.
@@ -286,17 +426,29 @@ class BridgeClient:
             with self._lock:
                 if self._active and (int(fields[2]), int(fields[3])) == self._active[:2]:
                     self._waiting_ack = False
-        elif command == "INDEX" and len(fields) == 5 and fields[1] == self._session:
+        elif command == "INDEX" and len(fields) in (5, 6) and fields[1] == self._session:
             index = int(fields[4])
             with self._lock:
                 valid = self._active and (int(fields[2]), int(fields[3])) == self._active[:2]
                 valid = valid and index in self._pending_indexes
-                if valid:
+                if valid and self._route_active != "xp":
+                    if len(fields) != 6:
+                        raise ValueError("Routed bookmark lacks audio offset")
+                    offset = int(fields[5])
+                    if offset < 0 or offset > 64 * 1024 * 1024:
+                        raise ValueError("Invalid audio bookmark offset")
+                    self._route_marks.append((offset, index))
+                    self._flush_route_marks()
+                elif valid:
                     # NVDA treats a later index as reaching earlier indexes too.
                     # Do not replay them out of order when DONE arrives.
                     while self._pending_indexes.popleft() != index:
                         pass
-            if valid:
+            if valid and self._route_active == "xp":
+                # DONE can recover a missing index for NVDA queue progress.
+                # Recovery checks must distinguish a SAPI bookmark we actually
+                # received from one reconstructed at completion.
+                self._notify("observedIndex", (int(fields[2]), index))
                 self._notify("index", (int(fields[2]), index))
         elif command == "FORMAT" and len(fields) == 5 and fields[1] == self._session:
             rate, bits, channels = map(int, fields[2:])
@@ -315,7 +467,8 @@ class BridgeClient:
             # Only report known fixed codes: never log arbitrary guest payloads.
             codes = {"sapi-engine-failed", "sapi-completion-failed", "batch-speak-failed",
                      "sapi-speak-failed", "sapi-pause-failed", "invalid-begin",
-                     "invalid-batch", "invalid-line", "utterance-too-long"}
+                     "invalid-batch", "invalid-line", "utterance-too-long",
+                     "local-playback-unavailable"}
             code = fields[4] if fields[4] in codes else "unrecognized-error"
             raise OSError(f"XP helper rejected a request ({code}); restarting the session")
         elif command == "NOTICE" and len(fields) == 5 and fields[1] == self._session:
@@ -337,14 +490,36 @@ class BridgeClient:
             return
         self._last_receive = time.monotonic()
 
+    def _flush_route_marks(self):
+        """Queue bookmarks only after their PCM byte offset is available."""
+        if self._audio_format is None:
+            return
+        while self._route_marks and self._route_marks[0][0] <= self._audio_bytes:
+            _, index = self._route_marks.popleft()
+            self.audio.index(index)
+
+    def _route_supported(self):
+        return (self.route == "xp" or
+                (self._audio_supported and
+                 (self.route == "nvda" or self._both_supported)))
+
+    def _target_route(self):
+        return self.route if self._route_supported() else "xp"
+
     def _prepare_utterance(self):
         """Reserve under the lock, prepare outside it, discard if canceled."""
         unavailable = False
         with self._lock:
             if (not self.connected or self._paused or self._refresh_pending
+                    or (self.route != "xp" and not self._route_supported()
+                        and time.monotonic() < self._caps_deadline)
+                    or self._route_active != self._target_route()
                     or self._active or not self._queue):
                 return
-            items = self._queue.popleft()
+            items, probe = self._queue.popleft()
+            if probe and not self._silent_probe_supported:
+                self._pending_done = False
+                return
             generation = self.generation
             if any(isinstance(item, Speech) and item.voice not in self._catalog for item in items):
                 self._queue.clear()
@@ -354,13 +529,18 @@ class BridgeClient:
                 self._request_id += 1
                 active = (generation, self._request_id, time.monotonic())
                 self._active = active
+                self._audio_probe = probe
                 session, quality = self._session, self.quality
         if unavailable:
             self._notify("voiceUnavailable", generation)
             return
         # Encoding/splitting long speech can take time on a busy host. Never
         # make NVDA's enqueue, cancel or pause wait for packet construction.
-        frames = deque(utterance_frames(session, generation, active[1], items, quality))
+        if probe:
+            frames = deque(utterance_frames(session, generation, active[1], items,
+                                            quality, probe=True))
+        else:
+            frames = deque(utterance_frames(session, generation, active[1], items, quality))
         indexes = deque(item.index for item in items if isinstance(item, Bookmark))
         limit = 120 + sum(len(item.text) * .5 for item in items if isinstance(item, Speech))
         shape = text_shape(items)
@@ -383,10 +563,19 @@ class BridgeClient:
         frames = []
         notifications = []
         with self._lock:
+            if (self.connected and self.route != "xp" and not self._route_supported()
+                    and time.monotonic() >= self._caps_deadline):
+                self.status = "Connected; XP helper cannot use requested audio route; playing through XP"
             if self.connected and self._mixer_supported and self._mixer_pending:
                 if self.full_xp_volume:
                     frames.append(f"MIXER\t{self._session}\n".encode("ascii"))
                 self._mixer_pending = False
+            target_route = self._target_route()
+            if (self.connected and self._audio_supported and not self._route_pending
+                    and self._route_active != target_route and not self._active):
+                frames.append(f"ROUTE\t{self._session}\t{target_route}\n".encode("ascii"))
+                self._route_pending = True
+                self._route_started = time.monotonic()
             while self._commands:
                 command, value = self._commands.popleft()
                 frames.append(f"{command}\t{self._session}\t{value}\n".encode("ascii"))
@@ -396,7 +585,9 @@ class BridgeClient:
                 frames.append(f"REFRESH\t{self._session}\n".encode("ascii"))
                 self._refresh_pending = True
                 self._last_refresh = time.monotonic()
-            if self.connected and not self._paused and not self._refresh_pending:
+            if (self.connected and not self._paused and not self._refresh_pending
+                    and not self._route_pending
+                    and self._route_active == target_route):
                 if self._active and self._frames and not self._waiting_ack:
                     frames.append(self._frames.popleft())
                     self._waiting_ack = True
@@ -441,6 +632,15 @@ class BridgeClient:
             self._refresh_disabled = False
             self._refresh_pending = False
             self._mixer_supported = False
+            self._audio_supported = False
+            self._both_supported = False
+            self._silent_probe_supported = False
+            self._route_pending = False
+            self._route_started = 0
+            self._route_active = "xp"
+            self._audio_format = None
+            self._route_marks.clear()
+            self._audio_failure = None
             self.mixer_status = "Helper support not reported"
             self._last_receive = time.monotonic()
             self._request_id = 0
@@ -455,6 +655,8 @@ class BridgeClient:
                 last_ping = now
             for fields in reader.feed(transport.read()):
                 self._process_line(fields)
+            if self._audio_failure:
+                raise OSError(self._audio_failure)
             if now - self._last_receive > 4:
                 raise TimeoutError("No reply from XP helper")
             refresh_timed_out = False
@@ -469,6 +671,8 @@ class BridgeClient:
                     refresh_timed_out = True
                 if self._waiting_ack and now - self._ack_started > ACK_TIMEOUT:
                     raise TimeoutError("XP did not acknowledge a speech packet")
+                if self._route_pending and now - self._route_started > ACK_TIMEOUT:
+                    raise TimeoutError("XP did not confirm the audio route")
                 if self._active and not self._paused and now - self._active[2] > self._active_limit:
                     raise TimeoutError("XP speech did not finish")
             if refresh_timed_out:
@@ -483,6 +687,8 @@ class BridgeClient:
         try:
             self._work()
         finally:
+            if self.audio is not None:
+                self.audio.close()
             self.closed_event.set()
 
     def _work(self):

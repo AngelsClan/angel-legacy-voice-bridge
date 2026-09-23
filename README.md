@@ -5,8 +5,9 @@ installed in your modern NVDA.
 
 You keep a Windows XP virtual machine on your own computer, with your licensed
 voices installed inside it. This project sends NVDA's text into that virtual
-machine, the voice speaks there, and you hear it through the virtual machine's
-sound output. For example, you can select AT&T Natural Voices Mike in NVDA on
+machine, and the voice speaks there. You can choose whether bridge speech plays
+through XP's sound output, NVDA's selected output device, or both. For example,
+you can select AT&T Natural Voices Mike in NVDA on
 Windows 11 while Mike is really running in XP.
 
 Everything stays on your computer. XP needs no internet connection, no network
@@ -22,7 +23,7 @@ This project was made with the help of AI.
 
 ## Current status: please read before installing
 
-**This is a development build (0.1.2-dev2) and the public release is on hold.**
+**This is a development build (0.1.2-dev3) and the public release is on hold.**
 
 A serious NVDA freeze was reported against version 0.1.1 and the exact cause is
 still unconfirmed. Several real defects have been found and fixed since, but
@@ -74,19 +75,21 @@ NVDA
        pretending to be a                   SAPI 5 voice
        serial cable                           |
                                               v
-                                       XP's sound output  ))) you hear this
+                                       XP's sound output  ))) by default
 ```
 
-The add-on sends text, not audio. It travels over a virtual serial port that
+The add-on sends text over a virtual serial port that
 your virtualization software presents to the host as a Windows named pipe. The
 helper inside XP hands that text to the SAPI 5 voice, and the voice plays
-through the virtual machine's own sound card. Nothing is sent over a network,
+through the virtual machine's own sound card by default. With **Send to NVDA**
+or **Both**, the helper also sends the rendered PCM back over that serial port.
+Other XP sounds stay on XP's sound card. Nothing is sent over a network,
 and the add-on never has to know a password for XP.
 
 This means one thing worth remembering: **a successful connection does not
-prove you will hear anything.** The connection carries text. The sound comes
-from XP's audio, so XP's volume, its sound device and your virtual machine's
-audio settings all still matter.
+prove you will hear anything.** On the default XP route, XP's volume, sound
+device and virtual machine audio settings matter. On the NVDA route, check
+NVDA's selected output device. Both routes need a working voice in XP.
 
 ## What you need
 
@@ -196,7 +199,7 @@ sounds still play.
 3. A console window opens and prints:
 
    ```text
-   Angel Legacy Voice Bridge 0.1.2-dev2. Waiting for the host. Ctrl+C exits.
+   Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits.
    ```
 
    Leave it open and Alt+Tab away, or minimize it. Control+C closes it. Later,
@@ -256,13 +259,14 @@ With XP running and its helper console open:
    1 channel(s)". The voice list fills in by itself; you do not need to press
    Refresh.
 4. Choose one of your XP voices in **Mirror/test voice**.
-5. Press **Test speech through XP**. You should hear the virtual machine say,
-   in that voice: "Angel Legacy Voice Bridge is ready. This sound comes from
-   Windows XP."
+5. Leave **Where XP bridge speech plays** on **XP speakers** for the first
+   test. Press **Test speech through XP** and listen for the fixed test phrase.
+   With the matching updated XP helper, you can then choose **Send to NVDA**
+   or **Both XP and NVDA** and test again. An older helper keeps audio on XP
+   and reports that the requested route is unsupported.
 
 If you hear it, the bridge works. If the status says connected but you hear
-nothing, go to [Troubleshooting](#troubleshooting): that is almost always XP's
-audio, not the connection.
+nothing, go to [Troubleshooting](#troubleshooting) and check the chosen output.
 
 ### Step 5: Choose how you want to use the voices
 
@@ -277,10 +281,10 @@ try the bridge, because your normal speech never depends on it. Do not select
 NVDA's "No speech" synthesizer for this; mirroring is designed to accompany a
 working local voice, not to replace it.
 
-**B. As your synthesizer — NVDA speaks only through XP.**
+**B. As your synthesizer — choose XP, NVDA, or both as the output.**
 
 Press NVDA+Control+S to open Select Synthesizer, and choose **Angel Legacy
-Voice Bridge (audio through XP)**. Then set the voice, rate, pitch and volume
+Voice Bridge**. Then set the voice, rate, pitch and volume
 in NVDA's ordinary Speech settings, exactly as you would for any other
 synthesizer. Mirroring switches itself off while the bridge is your
 synthesizer, so you never hear the same words twice.
@@ -358,6 +362,7 @@ These are in NVDA menu > Preferences > Settings > **Legacy Voice Bridge**.
 | Local bridge pipe | The exact pipe name your VM creates. No IP address and no guest password are involved. Switch to a local synthesizer before you change this. |
 | Detect running VM pipes | Lists the matching pipes that exist right now, so you can pick one. It does not start, change or inspect a virtual machine. It can only find a pipe that is already configured. |
 | Mirror local NVDA speech to XP | Sends your speech to XP as well as to your normal synthesizer. Turning it off cancels mirrored speech immediately. The two voices can overlap and drift apart in timing. Off by default. |
+| Where XP speech plays | XP speakers (default), Send to NVDA, or Both. Applies to bridge speech and the Test button. NVDA and Both require the matching updated XP helper. Other XP sounds remain on XP's sound card. |
 | Mirror/test voice | Which XP voice mirroring and the Test button use. It is saved by the voice's SAPI token ID, so it survives changes in list order. |
 | Mirror/test rate (0–100) | 50 by default, which is SAPI's normal speed. Engines interpret speed differently. |
 | Mirror/test volume (0–100) | 100 by default. Independent of the Windows and VM mixers. Zero silences most voices but not all of them (see above). |
@@ -425,9 +430,11 @@ By default you then choose for yourself when to go back to the bridge.
 **If you turned automatic return on**, the add-on does not trust appearances. A
 pipe that reconnects, or a voice that still appears in the list, proves
 nothing; a crashed engine can leave both looking perfectly healthy. Instead,
-while eSpeak is speaking normally, it quietly sends a short fixed check phrase
-to the original voice at volume zero and waits for the final bookmark that
-proves the voice really rendered it.
+while eSpeak is speaking normally, it sends a short fixed check phrase to the
+original voice. A capable XP helper captures and discards the PCM on every
+route, so the phrase is never played. The check needs a real final bookmark
+and non-silent audio before it can return. An older helper cannot run this
+check and automatic return stops; local eSpeak remains selected.
 
 - The first check is after 5 seconds, then the wait doubles up to one minute.
   Any single check that has not produced its bookmark within 15 seconds counts
@@ -474,10 +481,10 @@ Voice Bridge settings, confirm the test speech, and then select the
 synthesizer.
 
 **It says connected, but I hear nothing.**
-The connection carries text, not audio, so this is almost always sound. Check
-XP's own sounds, XP's default playback device, the volume and mute state inside
-XP, your virtual machine's audio output setting, and try a different SAPI 5
-voice. If XP is silent for its own start-up sounds too, fix that first.
+First check **Where XP speech plays**. On XP speakers, check XP's default
+playback device, volume and VM audio output. On Send to NVDA, check NVDA's
+selected output device and the connection status for an unsupported route.
+Both routes need a SAPI 5 voice that renders inside XP; try another voice.
 
 **A voice is silent for a moment right after I switch to it, then fine.**
 That is the voice engine starting up, not the bridge. It was seen with the Mac

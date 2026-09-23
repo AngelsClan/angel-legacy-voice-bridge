@@ -16,6 +16,27 @@ const unsigned int MAX_TEXT = 512;
 const unsigned int MAX_VOICES = 128;
 const DWORD HEARTBEAT_TIMEOUT = 6000;
 
+// Audio routing. The helper always starts a connection playing through the XP
+// sound card, so an add-on that never sends ROUTE behaves exactly as before.
+const unsigned int ROUTE_XP = 0;
+const unsigned int ROUTE_NVDA = 1;
+const unsigned int ROUTE_BOTH = 2;
+// Local playback for the Both route. Sixteen buffers of 8 KiB is about 2.9
+// seconds at 22.05 kHz: enough to ride out scheduling, small enough to bound.
+const unsigned int PLAYBACK_BUFFERS = 16;
+const unsigned int PLAYBACK_BUFFER_BYTES = 8192;
+// One second and a half of 22.05 kHz 16-bit mono. Bounded on purpose: when the
+// link cannot keep up, SAPI is made to wait rather than the helper growing.
+const unsigned int AUDIO_RING = 65536;
+const unsigned int AUDIO_FRAME_BYTES = 2048;
+const unsigned int AUDIO_FRAMES_PER_TURN = 8;
+const unsigned int AUDIO_LINE = 4096;
+// Never let a stalled reader hold the SAPI rendering thread for good.
+const DWORD AUDIO_WRITE_TIMEOUT = 5000;
+// Leave the virtual UART room for control messages behind queued audio.
+const DWORD AUDIO_TX_QUEUE_LIMIT = 8192;
+const unsigned int AUDIO_FALLBACK_RATE = 22050;
+
 HANDLE serialPort = INVALID_HANDLE_VALUE;
 ISpVoice* voice = NULL;
 ISpObjectToken* voices[MAX_VOICES] = {};
@@ -49,6 +70,57 @@ char outgoing[MAX_LINE];
 WCHAR speechText[MAX_TEXT];
 WCHAR speechXml[MAX_TEXT * 6 + 100];
 
+// Audio capture state. Only the ring and the sink counters are touched by the
+// SAPI rendering thread; everything else belongs to the single main loop.
+unsigned int audioRoute = ROUTE_XP;
+int appliedRoute = -1;
+unsigned int requestedQuality = 0;
+bool routedCapture = false;
+bool pendingDone = false;
+bool audioFormatSent = false;
+unsigned int audioSequence = 0;
+unsigned int nativeRate[MAX_VOICES] = {};
+unsigned int nativeChannels[MAX_VOICES] = {};
+// The format named at bind time. SAPI is not allowed to change it, so this is
+// the truth about the captured PCM and nothing has to ask the stream for it.
+unsigned int captureRate = 0;
+unsigned int captureBits = 0;
+unsigned int captureChannels = 0;
+// A recovery check must never be heard. Some engines, notably the AT&T voices,
+// still produce roughly a fifth of full level at SAPI volume zero, so silence
+// cannot be arranged by turning the voice down: the audio has to be kept away
+// from the sound card entirely and measured instead.
+bool batchProbe = false;
+bool probeUtterance = false;
+bool suppressFrames = false;
+unsigned int probeBytes = 0;
+bool probeNonSilent = false;
+ISpStream* captureStream = NULL;
+CRITICAL_SECTION audioLock;
+char audioRing[AUDIO_RING];
+char audioLine[AUDIO_LINE];
+unsigned int ringStart = 0;
+unsigned int ringUsed = 0;
+ULONGLONG sinkWritten = 0;
+ULONGLONG sinkPosition = 0;
+unsigned int seekAnomalies = 0;
+unsigned int writeTimeouts = 0;
+volatile LONG captureAbort = 1;
+
+// Local playback of the captured PCM, used only by the Both route. This opens
+// one ordinary wave output stream; it never touches the mixer, never mutes and
+// never changes any level, so the machine's other sounds continue unaffected.
+struct PlaybackBuffer {
+    WAVEHDR header;
+    char data[PLAYBACK_BUFFER_BYTES];
+    bool queued;
+};
+HWAVEOUT playbackDevice = NULL;
+PlaybackBuffer playbackBuffers[PLAYBACK_BUFFERS];
+unsigned int playbackRate = 0;
+unsigned int playbackChannels = 0;
+unsigned int playbackUnderruns = 0;
+
 void logMessage(const char* message) {
     DWORD written;
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), message, lstrlenA(message), &written, NULL);
@@ -58,6 +130,12 @@ void logMessage(const char* message) {
 bool sendLine(const char* line) {
     if (serialFault) return false;
     DWORD length = lstrlenA(line), written = 0;
+    // The host discards anything longer than its own line bound, so a helper
+    // line that grew past it would desynchronise the stream instead of failing.
+    if (length >= MAX_LINE) {
+        logMessage("Refused to send an over-long line.");
+        return false;
+    }
     if (!WriteFile(serialPort, line, length, &written, NULL) || written != length ||
         !WriteFile(serialPort, "\n", 1, &written, NULL) || written != 1) {
         serialFault = true;
@@ -127,7 +205,332 @@ void encodeName(const WCHAR* name, char* destination, unsigned int capacity) {
     destination[offset] = 0;
 }
 
+// Base64 keeps audio frames inside the existing tab-separated ASCII framing at
+// four characters per three bytes, where the protocol's hex would cost six.
+unsigned int encodeBase64(const char* data, unsigned int length, char* destination) {
+    static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    unsigned int offset = 0;
+    for (unsigned int i = 0; i < length; i += 3) {
+        unsigned int remaining = length - i;
+        unsigned int group = static_cast<unsigned char>(data[i]) << 16;
+        if (remaining > 1) group |= static_cast<unsigned char>(data[i + 1]) << 8;
+        if (remaining > 2) group |= static_cast<unsigned char>(data[i + 2]);
+        destination[offset++] = digits[(group >> 18) & 63];
+        destination[offset++] = digits[(group >> 12) & 63];
+        destination[offset++] = remaining > 1 ? digits[(group >> 6) & 63] : '=';
+        destination[offset++] = remaining > 2 ? digits[group & 63] : '=';
+    }
+    destination[offset] = 0;
+    return offset;
+}
+
+// ---------------------------------------------------------------------------
+// Captured speech audio
+//
+// When the add-on asks for the NVDA route, SAPI writes into this sink instead
+// of the XP sound card. The sink is the base stream of a SAPI SpStream object,
+// which lets SAPI tell us the engine's own output format instead of forcing a
+// rate and resampling. Other XP sounds are never touched.
+//
+// The sink is filled on SAPI's rendering thread and drained on the main loop,
+// so only these functions take the lock, and nothing here writes to the serial
+// port. The build has no C runtime startup, so the object is a plain struct
+// with an explicit vtable rather than a class whose constructor would never run.
+// ---------------------------------------------------------------------------
+
+bool sameGuid(const GUID& left, const GUID& right) {
+    const DWORD* a = reinterpret_cast<const DWORD*>(&left);
+    const DWORD* b = reinterpret_cast<const DWORD*>(&right);
+    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
+}
+
+const GUID GUID_UNKNOWN = {0x00000000, 0x0000, 0x0000, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
+const GUID GUID_SEQUENTIAL_STREAM = {0x0c733a30, 0x2a1c, 0x11ce, {0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d}};
+const GUID GUID_STREAM = {0x0000000c, 0x0000, 0x0000, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
+
+struct AudioSink;
+struct AudioSinkVtbl {
+    HRESULT (STDMETHODCALLTYPE* QueryInterface)(AudioSink*, REFIID, void**);
+    ULONG (STDMETHODCALLTYPE* AddRef)(AudioSink*);
+    ULONG (STDMETHODCALLTYPE* Release)(AudioSink*);
+    HRESULT (STDMETHODCALLTYPE* Read)(AudioSink*, void*, ULONG, ULONG*);
+    HRESULT (STDMETHODCALLTYPE* Write)(AudioSink*, const void*, ULONG, ULONG*);
+    HRESULT (STDMETHODCALLTYPE* Seek)(AudioSink*, LARGE_INTEGER, DWORD, ULARGE_INTEGER*);
+    HRESULT (STDMETHODCALLTYPE* SetSize)(AudioSink*, ULARGE_INTEGER);
+    HRESULT (STDMETHODCALLTYPE* CopyTo)(AudioSink*, IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*);
+    HRESULT (STDMETHODCALLTYPE* Commit)(AudioSink*, DWORD);
+    HRESULT (STDMETHODCALLTYPE* Revert)(AudioSink*);
+    HRESULT (STDMETHODCALLTYPE* LockRegion)(AudioSink*, ULARGE_INTEGER, ULARGE_INTEGER, DWORD);
+    HRESULT (STDMETHODCALLTYPE* UnlockRegion)(AudioSink*, ULARGE_INTEGER, ULARGE_INTEGER, DWORD);
+    HRESULT (STDMETHODCALLTYPE* Stat)(AudioSink*, STATSTG*, DWORD);
+    HRESULT (STDMETHODCALLTYPE* Clone)(AudioSink*, IStream**);
+};
+struct AudioSink { const AudioSinkVtbl* table; };
+
+void captureRewind() {
+    EnterCriticalSection(&audioLock);
+    ringStart = 0;
+    ringUsed = 0;
+    sinkWritten = 0;
+    sinkPosition = 0;
+    seekAnomalies = 0;
+    writeTimeouts = 0;
+    LeaveCriticalSection(&audioLock);
+    audioSequence = 0;
+    audioFormatSent = false;
+    InterlockedExchange(&captureAbort, 0);
+}
+
+// Release a blocked rendering thread before anything waits on SAPI itself.
+void captureAbortNow() {
+    InterlockedExchange(&captureAbort, 1);
+    EnterCriticalSection(&audioLock);
+    ringStart = 0;
+    ringUsed = 0;
+    LeaveCriticalSection(&audioLock);
+    routedCapture = false;
+    pendingDone = false;
+    // A cancelled check must not leave its measurement to be reported against
+    // whatever speaks next.
+    probeUtterance = false;
+    suppressFrames = false;
+}
+
+bool captureEmpty() {
+    EnterCriticalSection(&audioLock);
+    bool empty = ringUsed == 0;
+    LeaveCriticalSection(&audioLock);
+    return empty;
+}
+
+// Take whole 4-byte blocks so a frame never splits a stereo sample pair; the
+// final short remainder is only released once the engine has actually finished.
+unsigned int captureTake(char* destination, unsigned int capacity, bool flushTail) {
+    EnterCriticalSection(&audioLock);
+    unsigned int available = ringUsed < capacity ? ringUsed : capacity;
+    if (!flushTail) available -= available % 4;
+    unsigned int firstSpan = AUDIO_RING - ringStart;
+    if (firstSpan > available) firstSpan = available;
+    memcpy(destination, audioRing + ringStart, firstSpan);
+    if (available > firstSpan) memcpy(destination + firstSpan, audioRing, available - firstSpan);
+    ringStart = (ringStart + available) % AUDIO_RING;
+    ringUsed -= available;
+    LeaveCriticalSection(&audioLock);
+    return available;
+}
+
+HRESULT STDMETHODCALLTYPE sinkQueryInterface(AudioSink* self, REFIID id, void** result) {
+    if (!result) return E_POINTER;
+    if (sameGuid(id, GUID_UNKNOWN) || sameGuid(id, GUID_SEQUENTIAL_STREAM) || sameGuid(id, GUID_STREAM)) {
+        *result = self;
+        return S_OK;
+    }
+    *result = NULL;
+    return E_NOINTERFACE;
+}
+
+// One process-lifetime singleton: reference counting would add no safety here.
+ULONG STDMETHODCALLTYPE sinkAddRef(AudioSink*) { return 1; }
+ULONG STDMETHODCALLTYPE sinkRelease(AudioSink*) { return 1; }
+
+HRESULT STDMETHODCALLTYPE sinkRead(AudioSink*, void*, ULONG, ULONG* read) {
+    if (read) *read = 0;
+    return S_FALSE;
+}
+
+HRESULT STDMETHODCALLTYPE sinkWrite(AudioSink*, const void* data, ULONG count, ULONG* written) {
+    if (written) *written = 0;
+    if (!data && count) return E_POINTER;
+    const char* bytes = static_cast<const char*>(data);
+    ULONG done = 0;
+    DWORD waitingSince = GetTickCount();
+    while (done < count) {
+        if (captureAbort) return E_ABORT;
+        EnterCriticalSection(&audioLock);
+        unsigned int room = AUDIO_RING - ringUsed;
+        unsigned int chunk = count - done < room ? count - done : room;
+        unsigned int end = (ringStart + ringUsed) % AUDIO_RING;
+        unsigned int firstSpan = AUDIO_RING - end;
+        if (firstSpan > chunk) firstSpan = chunk;
+        memcpy(audioRing + end, bytes + done, firstSpan);
+        if (chunk > firstSpan) memcpy(audioRing, bytes + done + firstSpan, chunk - firstSpan);
+        ringUsed += chunk;
+        sinkWritten += chunk;
+        sinkPosition += chunk;
+        LeaveCriticalSection(&audioLock);
+        done += chunk;
+        if (done == count) break;
+        // The ring is full: the link is slower than the engine. Waiting here
+        // paces SAPI instead of dropping speech, but never without a bound.
+        if (static_cast<DWORD>(GetTickCount() - waitingSince) > AUDIO_WRITE_TIMEOUT) {
+            ++writeTimeouts;
+            return E_ABORT;
+        }
+        if (chunk) waitingSince = GetTickCount();
+        Sleep(1);
+    }
+    if (written) *written = done;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE sinkSeek(AudioSink*, LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER* result) {
+    if (origin > STREAM_SEEK_END) return STG_E_INVALIDFUNCTION;
+    EnterCriticalSection(&audioLock);
+    LONGLONG base = origin == STREAM_SEEK_SET ? 0
+                  : origin == STREAM_SEEK_CUR ? static_cast<LONGLONG>(sinkPosition)
+                                              : static_cast<LONGLONG>(sinkWritten);
+    LONGLONG target = base + move.QuadPart;
+    bool valid = target >= 0;
+    if (valid) {
+        // Audio already handed to the host cannot be rewritten. Count any real
+        // repositioning so a wrapper that patches a header is visible, not silent.
+        if (static_cast<ULONGLONG>(target) != sinkPosition) ++seekAnomalies;
+        sinkPosition = static_cast<ULONGLONG>(target);
+    }
+    if (result) result->QuadPart = sinkPosition;
+    LeaveCriticalSection(&audioLock);
+    return valid ? S_OK : STG_E_INVALIDFUNCTION;
+}
+
+HRESULT STDMETHODCALLTYPE sinkSetSize(AudioSink*, ULARGE_INTEGER) { return S_OK; }
+HRESULT STDMETHODCALLTYPE sinkCopyTo(AudioSink*, IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) {
+    return E_NOTIMPL;
+}
+HRESULT STDMETHODCALLTYPE sinkCommit(AudioSink*, DWORD) { return S_OK; }
+HRESULT STDMETHODCALLTYPE sinkRevert(AudioSink*) { return S_OK; }
+HRESULT STDMETHODCALLTYPE sinkLockRegion(AudioSink*, ULARGE_INTEGER, ULARGE_INTEGER, DWORD) {
+    return STG_E_INVALIDFUNCTION;
+}
+HRESULT STDMETHODCALLTYPE sinkUnlockRegion(AudioSink*, ULARGE_INTEGER, ULARGE_INTEGER, DWORD) {
+    return STG_E_INVALIDFUNCTION;
+}
+
+HRESULT STDMETHODCALLTYPE sinkStat(AudioSink*, STATSTG* status, DWORD) {
+    if (!status) return E_POINTER;
+    STATSTG empty = {};
+    *status = empty;
+    status->type = STGTY_STREAM;
+    status->grfMode = STGM_WRITE;
+    EnterCriticalSection(&audioLock);
+    status->cbSize.QuadPart = sinkWritten;
+    LeaveCriticalSection(&audioLock);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE sinkClone(AudioSink*, IStream**) { return E_NOTIMPL; }
+
+const AudioSinkVtbl audioSinkTable = {
+    sinkQueryInterface, sinkAddRef, sinkRelease, sinkRead, sinkWrite, sinkSeek,
+    sinkSetSize, sinkCopyTo, sinkCommit, sinkRevert, sinkLockRegion,
+    sinkUnlockRegion, sinkStat, sinkClone
+};
+AudioSink audioSink = {&audioSinkTable};
+
+IStream* sinkStream() { return reinterpret_cast<IStream*>(&audioSink); }
+
+// ---------------------------------------------------------------------------
+// Local playback for the Both route
+//
+// The captured PCM is played here as well as sent to the host. Buffers are
+// recycled only once the device reports them finished, and the frame pump
+// stops taking audio while none is free, so playback paces the whole path
+// instead of anything being dropped. Nothing else on the machine is muted,
+// ducked or re-levelled: this is one ordinary wave output stream.
+// ---------------------------------------------------------------------------
+
+void releaseFinishedBuffers() {
+    if (!playbackDevice) return;
+    for (unsigned int i = 0; i < PLAYBACK_BUFFERS; ++i) {
+        PlaybackBuffer& buffer = playbackBuffers[i];
+        if (buffer.queued && (buffer.header.dwFlags & WHDR_DONE)) {
+            waveOutUnprepareHeader(playbackDevice, &buffer.header, sizeof(WAVEHDR));
+            buffer.queued = false;
+        }
+    }
+}
+
+void closePlayback() {
+    if (!playbackDevice) return;
+    // Reset first: unpreparing a header the device still owns fails.
+    waveOutReset(playbackDevice);
+    for (unsigned int i = 0; i < PLAYBACK_BUFFERS; ++i) {
+        PlaybackBuffer& buffer = playbackBuffers[i];
+        if (buffer.queued) {
+            waveOutUnprepareHeader(playbackDevice, &buffer.header, sizeof(WAVEHDR));
+            buffer.queued = false;
+        }
+    }
+    waveOutClose(playbackDevice);
+    playbackDevice = NULL;
+    playbackRate = 0;
+    playbackChannels = 0;
+}
+
+// Discard whatever has not been heard yet. Used for cancellation only.
+void resetPlayback() {
+    if (!playbackDevice) return;
+    waveOutReset(playbackDevice);
+    releaseFinishedBuffers();
+}
+
+bool openPlayback(unsigned int rate, unsigned int channels) {
+    if (playbackDevice && playbackRate == rate && playbackChannels == channels) return true;
+    closePlayback();
+    WAVEFORMATEX format = {};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = static_cast<WORD>(channels);
+    format.nSamplesPerSec = rate;
+    format.wBitsPerSample = 16;
+    format.nBlockAlign = static_cast<WORD>(channels * 2);
+    format.nAvgBytesPerSec = rate * channels * 2;
+    // WAVE_MAPPER is the machine's own default output, the same one the user's
+    // other programs use. No device is taken exclusively.
+    if (waveOutOpen(&playbackDevice, WAVE_MAPPER, &format, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) {
+        playbackDevice = NULL;
+        return false;
+    }
+    for (unsigned int i = 0; i < PLAYBACK_BUFFERS; ++i) playbackBuffers[i].queued = false;
+    playbackRate = rate;
+    playbackChannels = channels;
+    return true;
+}
+
+// A buffer is available only when the device has finished with it.
+PlaybackBuffer* freePlaybackBuffer() {
+    releaseFinishedBuffers();
+    for (unsigned int i = 0; i < PLAYBACK_BUFFERS; ++i)
+        if (!playbackBuffers[i].queued) return &playbackBuffers[i];
+    return NULL;
+}
+
+bool playbackHasRoom() { return freePlaybackBuffer() != NULL; }
+
+bool playCapturedAudio(const char* data, unsigned int length) {
+    if (!playbackDevice || length > PLAYBACK_BUFFER_BYTES) return false;
+    PlaybackBuffer* buffer = freePlaybackBuffer();
+    if (!buffer) return false;
+    memcpy(buffer->data, data, length);
+    WAVEHDR header = {};
+    header.lpData = buffer->data;
+    header.dwBufferLength = length;
+    buffer->header = header;
+    if (waveOutPrepareHeader(playbackDevice, &buffer->header, sizeof(WAVEHDR)) != MMSYSERR_NOERROR)
+        return false;
+    if (waveOutWrite(playbackDevice, &buffer->header, sizeof(WAVEHDR)) != MMSYSERR_NOERROR) {
+        waveOutUnprepareHeader(playbackDevice, &buffer->header, sizeof(WAVEHDR));
+        ++playbackUnderruns;
+        return false;
+    }
+    buffer->queued = true;
+    return true;
+}
+
 void stopSpeech() {
+    // Free the rendering thread first: it may be waiting for ring space, and
+    // purging SAPI waits for that same thread to unwind.
+    captureAbortNow();
+    // Cancellation must silence what the Both route has already queued.
+    resetPlayback();
     if (voice) {
         voice->Speak(NULL, SPF_PURGEBEFORESPEAK, NULL);
         if (paused) voice->Resume();
@@ -294,6 +697,9 @@ bool loadVoices() {
         if (!voices[slot] || !voiceNames[slot] || lstrcmpW(voiceNames[slot], newNames[i])) {
             catalogChanged = true;
             if (selectedVoice == static_cast<int>(slot)) selectedVoice = -1;
+            // A reinstalled or renamed voice may output at a different rate.
+            nativeRate[slot] = 0;
+            nativeChannels[slot] = 0;
         }
         if (voices[slot]) voices[slot]->Release();
         if (voiceNames[slot]) CoTaskMemFree(voiceNames[slot]);
@@ -306,6 +712,8 @@ bool loadVoices() {
             catalogChanged = true;
             voices[i]->Release();
             voices[i] = NULL;
+            nativeRate[i] = 0;
+            nativeChannels[i] = 0;
             if (selectedVoice == static_cast<int>(i)) selectedVoice = -1;
         }
     }
@@ -331,6 +739,14 @@ void announceVoices() {
         wsprintfA(outgoing, "CAPS\t%s\tvoice-refresh", session);
         sendLine(outgoing);
         wsprintfA(outgoing, "CAPS\t%s\txp-volume", session);
+        sendLine(outgoing);
+        wsprintfA(outgoing, "CAPS\t%s\taudio-pcm", session);
+        sendLine(outgoing);
+        // Advertised separately so a host that only knows audio-pcm keeps
+        // offering the two routes it understands.
+        wsprintfA(outgoing, "CAPS\t%s\taudio-both", session);
+        sendLine(outgoing);
+        wsprintfA(outgoing, "CAPS\t%s\tsilent-probe", session);
         sendLine(outgoing);
     }
 }
@@ -368,6 +784,7 @@ HRESULT selectVoice(unsigned int slot) {
 }
 
 HRESULT setOutputQuality(unsigned int sampleRate);
+HRESULT applyOutput(unsigned int slot, unsigned int sampleRate);
 
 HRESULT speakXml(unsigned int slot, const WCHAR* xml, ULONG* stream) {
     HRESULT result = voice->Speak(xml, SPF_ASYNC | SPF_IS_XML, stream);
@@ -394,11 +811,12 @@ HRESULT speakXml(unsigned int slot, const WCHAR* xml, ULONG* stream) {
     voice->Speak(NULL, SPF_PURGEBEFORESPEAK, NULL);
     voice->Release();
     voice = replacement;
-    unsigned int quality = selectedQuality < 0 ? 0 : selectedQuality;
+    unsigned int quality = requestedQuality;
     selectedVoice = -1;
     selectedQuality = -1;
+    appliedRoute = -1;
     result = selectVoice(slot);
-    if (SUCCEEDED(result)) result = setOutputQuality(quality);
+    if (SUCCEEDED(result)) result = applyOutput(slot, quality);
     if (SUCCEEDED(result)) result = voice->SetRate(rate);
     if (SUCCEEDED(result)) result = voice->SetVolume(volume);
     if (SUCCEEDED(result)) result = voice->Speak(xml, SPF_ASYNC | SPF_IS_XML, stream);
@@ -424,6 +842,16 @@ void speakCommand(char** fields, unsigned int count) {
     if (newGeneration != generation) return;
     if (speaking) { sendError("speech-already-active"); return; }
     requestId = newRequest;
+    // Version 1 has no audio route; make sure a stale capture binding from a
+    // previous version 2 session cannot swallow this utterance.
+    if (appliedRoute != static_cast<int>(ROUTE_XP) && appliedRoute >= 0) {
+        closePlayback();
+        audioRoute = ROUTE_XP;
+        appliedRoute = -1;
+        selectedQuality = -1;
+        requestedQuality = 0;
+        setOutputQuality(0);
+    }
     HRESULT result = selectVoice(voiceIndex);
     if (SUCCEEDED(result)) result = voice->SetRate(static_cast<int>(rate) - 10);
     if (SUCCEEDED(result)) result = voice->SetVolume(static_cast<USHORT>(volume));
@@ -498,7 +926,210 @@ HRESULT setOutputQuality(unsigned int sampleRate) {
     return result;
 }
 
+// Learn the format SAPI negotiates for the selected voice on the real output,
+// so 'voice default' can be captured without resampling. Measured on XP: this
+// reports 16 kHz for the AT&T voices and 22.05 kHz for the others, so it does
+// follow the engine. It speaks nothing and produces no sound.
+void discoverNativeFormat(unsigned int slot) {
+    if (slot >= MAX_VOICES || nativeRate[slot]) return;
+    if (FAILED(voice->SetOutput(NULL, TRUE))) return;
+    // The real output object was just replaced; no cached binding survives it.
+    selectedQuality = -1;
+    appliedRoute = -1;
+    ISpStreamFormat* stream = NULL;
+    if (FAILED(voice->GetOutputStream(&stream)) || !stream) return;
+    GUID formatId;
+    WAVEFORMATEX* format = NULL;
+    if (SUCCEEDED(stream->GetFormat(&formatId, &format)) && format) {
+        if (format->nSamplesPerSec >= 8000 && format->nSamplesPerSec <= 48000 &&
+            format->wBitsPerSample == 16 && (format->nChannels == 1 || format->nChannels == 2)) {
+            nativeRate[slot] = format->nSamplesPerSec;
+            nativeChannels[slot] = format->nChannels;
+        }
+        CoTaskMemFree(format);
+    }
+    stream->Release();
+}
+
+// Bind SAPI's output to the capture sink. SAPI will not fill in the engine's
+// format for a caller-supplied base stream, so the format has to be named:
+// either the rate the user chose, or the one discovered above.
+// A SAPI stream keeps its base stream until it is closed: binding a second
+// utterance onto the same object returns SPERR_ALREADY_INITIALIZED. Close it
+// first, and if that is not enough, start with a fresh one.
+HRESULT rebindCaptureStream(const WAVEFORMATEX* format) {
+    if (captureStream) {
+        captureStream->Close();
+        HRESULT result = captureStream->SetBaseStream(sinkStream(), SPDFID_WaveFormatEx, format);
+        if (SUCCEEDED(result)) return result;
+        captureStream->Release();
+        captureStream = NULL;
+    }
+    HRESULT created = CoCreateInstance(CLSID_SpStream, NULL, CLSCTX_INPROC_SERVER,
+                                       IID_ISpStream, reinterpret_cast<void**>(&captureStream));
+    if (FAILED(created)) return created;
+    return captureStream->SetBaseStream(sinkStream(), SPDFID_WaveFormatEx, format);
+}
+
+HRESULT bindCaptureOutput(unsigned int slot, unsigned int sampleRate) {
+    unsigned int rate = sampleRate;
+    unsigned int channels = 1;
+    if (!rate) {
+        discoverNativeFormat(slot);
+        if (slot < MAX_VOICES && nativeRate[slot]) {
+            rate = nativeRate[slot];
+            channels = nativeChannels[slot];
+        }
+    }
+    if (!rate) rate = AUDIO_FALLBACK_RATE;
+    WAVEFORMATEX format = {};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = static_cast<WORD>(channels);
+    format.nSamplesPerSec = rate;
+    format.wBitsPerSample = 16;
+    format.nBlockAlign = static_cast<WORD>(channels * 2);
+    format.nAvgBytesPerSec = rate * channels * 2;
+    captureRate = rate;
+    captureBits = 16;
+    captureChannels = channels;
+    captureRewind();
+    HRESULT result = rebindCaptureStream(&format);
+    if (FAILED(result)) return result;
+    return voice->SetOutput(captureStream, FALSE);
+}
+
+HRESULT applyOutput(unsigned int slot, unsigned int sampleRate) {
+    // The capture route deliberately clears selectedQuality, so remember the
+    // requested rate here; the one-time Speak retry must not silently lose it.
+    requestedQuality = sampleRate;
+    // A probe is always rendered into memory and never played anywhere, no
+    // matter which route the user chose.
+    unsigned int target = batchProbe ? ROUTE_NVDA : audioRoute;
+    if (target == ROUTE_XP) {
+        closePlayback();
+        if (appliedRoute != static_cast<int>(ROUTE_XP)) selectedQuality = -1;
+        HRESULT result = setOutputQuality(sampleRate);
+        if (SUCCEEDED(result)) appliedRoute = ROUTE_XP;
+        return result;
+    }
+    HRESULT result = bindCaptureOutput(slot, sampleRate);
+    if (FAILED(result)) return result;
+    if (target == ROUTE_BOTH && !openPlayback(captureRate, captureChannels)) {
+        // Better to say the local device is unavailable than to quietly send
+        // the speech to NVDA only while the user asked to hear it here too.
+        closePlayback();
+        return E_FAIL;
+    }
+    if (target != ROUTE_BOTH) closePlayback();
+    appliedRoute = target;
+    // Returning to the speakers must always reconfigure the real device.
+    selectedQuality = -1;
+    return result;
+}
+
+// Announce the format that was named when the stream was bound.
+//
+// This must NOT ask the capture stream, and neither must anything else on this
+// thread while speech is in flight. SAPI's stream object serialises its own
+// methods, and the rendering thread sits inside its Write for as long as the
+// link needs to catch up. Measured on XP: a GetFormat call from this thread
+// blocked for 4,984 ms of a 5,000 ms wait. That froze the very loop that
+// drains the buffer, so the wait could never end, and the host gave up first.
+// SAPI is bound with format changes disallowed, so the named format is the
+// truth and no call is needed.
+void emitAudioFormat() {
+    if (audioFormatSent) return;
+    audioFormatSent = true;
+    // Unreachable while capture is only enabled after a successful bind, but
+    // announcing a zero format would be worse than refusing to speak.
+    if (captureRate < 8000 || captureRate > 48000 || captureBits != 16 ||
+        (captureChannels != 1 && captureChannels != 2)) {
+        stopSpeech();
+        sendError("audio-format-unsupported");
+        return;
+    }
+    wsprintfA(outgoing, "AUDIOFORMAT\t%s\t%u\t%u\t%u\t%u\t%u",
+              session, generation, requestId, captureRate, captureBits, captureChannels);
+    sendLine(outgoing);
+}
+
+// Room in the transmit queue, so audio never blocks the loop that also reads
+// cancellation and answers the heartbeat.
+bool audioLinkHasRoom() {
+    COMSTAT status = {};
+    DWORD errors = 0;
+    if (!ClearCommError(serialPort, &errors, &status)) return true;
+    return status.cbOutQue <= AUDIO_TX_QUEUE_LIMIT;
+}
+
+void pumpCapturedAudio() {
+    if (!routedCapture) return;
+    bool alsoPlayHere = appliedRoute == static_cast<int>(ROUTE_BOTH);
+    if (alsoPlayHere && !playbackDevice) {
+        // Binding opens the device before speaking, so this cannot normally
+        // happen. Say so and stop rather than waiting for room that no device
+        // will ever free, which would hang the utterance.
+        stopSpeech();
+        sendError("local-playback-unavailable");
+        return;
+    }
+    for (unsigned int frames = 0; frames < AUDIO_FRAMES_PER_TURN; ++frames) {
+        if (!audioLinkHasRoom()) break;
+        // On the Both route the local device sets the pace. Taking audio we
+        // cannot also play would either drop it or run the two outputs apart.
+        if (alsoPlayHere && !playbackHasRoom()) break;
+        char raw[AUDIO_FRAME_BYTES];
+        unsigned int taken = captureTake(raw, AUDIO_FRAME_BYTES, pendingDone);
+        if (!taken) break;
+        if (alsoPlayHere && !playCapturedAudio(raw, taken)) {
+            ++playbackUnderruns;
+            logMessage("Local playback refused a buffer; that audio was not heard on this machine.");
+        }
+        if (probeUtterance) {
+            probeBytes += taken;
+            // Real speech, not a run of digital silence. The threshold ignores
+            // the tiny dither some engines emit while producing nothing.
+            for (unsigned int i = 0; i + 1 < taken; i += 2) {
+                short sample = static_cast<short>(
+                    static_cast<unsigned char>(raw[i]) | (static_cast<unsigned char>(raw[i + 1]) << 8));
+                if (sample > 64 || sample < -64) { probeNonSilent = true; break; }
+            }
+        }
+        if (suppressFrames) continue;
+        emitAudioFormat();
+        if (!routedCapture) return;
+        int prefix = wsprintfA(audioLine, "AUDIO\t%s\t%u\t%u\t%u\t",
+                               session, generation, requestId, audioSequence);
+        encodeBase64(raw, taken, audioLine + prefix);
+        ++audioSequence;
+        if (!sendLine(audioLine)) return;
+    }
+    if (!pendingDone || !captureEmpty()) return;
+    pendingDone = false;
+    routedCapture = false;
+    if (seekAnomalies || writeTimeouts)
+        logMessage("Captured audio needed stream repositioning or timed out waiting for the host.");
+    // Measured proof that the engine really rendered, for a check that was
+    // deliberately never played. Old hosts ignore an unknown line.
+    if (probeUtterance) {
+        wsprintfA(outgoing, "PROBEAUDIO\t%s\t%u\t%u\t%u\t%u",
+                  session, generation, requestId, probeBytes, probeNonSilent ? 1u : 0u);
+        sendLine(outgoing);
+        probeUtterance = false;
+        suppressFrames = false;
+    }
+    wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
+    sendLine(outgoing);
+}
+
 void reportFormat() {
+    // Same hazard as emitAudioFormat: GetOutputStream returns the capture
+    // stream on the routed path, and touching it here would stall the loop.
+    if (routedCapture) {
+        wsprintfA(outgoing, "FORMAT\t%s\t%u\t%u\t%u", session, captureRate, captureBits, captureChannels);
+        sendLine(outgoing);
+        return;
+    }
     ISpStreamFormat* stream = NULL;
     if (FAILED(voice->GetOutputStream(&stream))) return;
     GUID formatId;
@@ -518,12 +1149,24 @@ void batchCommand(char** fields, unsigned int count) {
         !parseNumber(fields[3], 2147483647, newRequest)) { sendError("invalid-batch"); return; }
     if (newGeneration != generation) return;
     if (!lstrcmpA(fields[0], "BEGIN")) {
-        if (count != 6 || speaking || assembling ||
+        // An optional seventh field marks a recovery check. Older hosts send
+        // six fields and are simply never treated as probing.
+        unsigned int probeFlag = 0;
+        if (count == 7 && !parseNumber(fields[6], 1, probeFlag)) { sendError("invalid-begin"); return; }
+        if ((count != 6 && count != 7) || speaking || assembling ||
             !parseNumber(fields[4], MAX_VOICES - 1, batchVoice) || batchVoice >= voiceCount || !voices[batchVoice] ||
             !parseNumber(fields[5], 48000, batchQuality) ||
             (batchQuality && batchQuality != 16000 && batchQuality != 22050 && batchQuality != 44100 && batchQuality != 48000)) {
             sendError("invalid-begin"); return;
         }
+        // The host only sends BEGIN after DONE, so audio from the previous
+        // utterance cannot still be draining here. If it ever were, abandon it
+        // rather than let its tail and sequence numbers run into this one.
+        if (pendingDone) {
+            captureAbortNow();
+            logMessage("A new utterance arrived before the previous audio finished; the remainder was dropped.");
+        }
+        batchProbe = probeFlag != 0;
         requestId = newRequest;
         xmlUsed = 0;
         styleOpen = false;
@@ -553,9 +1196,16 @@ void batchCommand(char** fields, unsigned int count) {
         } else if (!lstrcmpA(fields[0], "COMMIT") && count == 4) {
             if (!closeStyle()) { stopSpeech(); sendError("utterance-too-long"); return; }
             assembling = false;
+            probeUtterance = batchProbe;
+            // On the XP route a probe has nowhere to go: the host is not
+            // expecting audio frames there, so count the PCM instead of
+            // sending it. On the other routes the host already discards it.
+            suppressFrames = batchProbe && audioRoute == ROUTE_XP;
+            probeBytes = 0;
+            probeNonSilent = false;
             HRESULT result = selectVoice(batchVoice);
             unsigned int stage = 1;
-            if (SUCCEEDED(result)) { stage = 2; result = setOutputQuality(batchQuality); }
+            if (SUCCEEDED(result)) { stage = 2; result = applyOutput(batchVoice, batchQuality); }
             if (SUCCEEDED(result)) { stage = 3; result = voice->SetRate(0); }
             if (SUCCEEDED(result)) { stage = 4; result = voice->SetVolume(100); }
             if (SUCCEEDED(result) && xmlUsed) {
@@ -563,11 +1213,14 @@ void batchCommand(char** fields, unsigned int count) {
                 result = speakXml(batchVoice, utteranceXml, &activeStream);
             }
             if (FAILED(result)) {
+                captureAbortNow();
                 reportSapiFailure(stage, result, batchVoice, batchQuality);
                 sendError("batch-speak-failed"); return;
             }
             speaking = xmlUsed != 0;
             batchSpeech = speaking;
+            // Captured audio is forwarded by the main loop; DONE waits for it.
+            routedCapture = speaking && appliedRoute != static_cast<int>(ROUTE_XP) && appliedRoute >= 0;
             reportFormat();
             if (!speaking) {
                 wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
@@ -588,11 +1241,15 @@ void finishSpeech() {
     speaking = false;
     batchSpeech = false;
     if (FAILED(result) || FAILED(status.hrLastResult)) {
+        captureAbortNow();
         reportSapiFailure(FAILED(result) ? 6 : 7, FAILED(result) ? result : status.hrLastResult,
                           selectedVoice < 0 ? MAX_VOICES : selectedVoice, batchQuality);
         sendError("sapi-engine-failed");
         return;
     }
+    // On the NVDA route the engine is finished but the audio is not: DONE must
+    // not claim completion before the last frame has left the helper.
+    if (routedCapture) { pendingDone = true; return; }
     wsprintfA(outgoing, "DONE\t%s\t%u\t%u", session, generation, requestId);
     sendLine(outgoing);
 }
@@ -603,7 +1260,16 @@ void speechEvents() {
     while (voice->GetEvents(1, &event, &fetched) == S_OK && fetched) {
         if (batchSpeech && event.ulStreamNum == activeStream) {
             if (event.eEventId == SPEI_TTS_BOOKMARK) {
-                wsprintfA(outgoing, "INDEX\t%s\t%u\t%u\t%u", session, generation, requestId, static_cast<unsigned int>(event.wParam));
+                // Rendering into a stream runs far ahead of real time, so a
+                // routed bookmark carries the byte offset it belongs to and the
+                // host fires it when playback reaches that point. Old add-ons
+                // keep the five-field line they already understand.
+                if (routedCapture)
+                    wsprintfA(outgoing, "INDEX\t%s\t%u\t%u\t%u\t%lu", session, generation, requestId,
+                              static_cast<unsigned int>(event.wParam),
+                              static_cast<DWORD>(event.ullAudioStreamOffset));
+                else
+                    wsprintfA(outgoing, "INDEX\t%s\t%u\t%u\t%u", session, generation, requestId, static_cast<unsigned int>(event.wParam));
                 sendLine(outgoing);
             } else if (event.eEventId == SPEI_END_INPUT_STREAM) {
 #ifndef ALVB_TEST_DROP_END_EVENTS
@@ -651,6 +1317,12 @@ void handleLine(char* line) {
     if (count == 3 && !lstrcmpA(fields[0], "HELLO") &&
         (!lstrcmpA(fields[1], "1") || !lstrcmpA(fields[1], "2")) && validSession(fields[2])) {
         stopSpeech();
+        // Every connection starts on the XP sound card, so an add-on that does
+        // not know about routing inherits exactly the old behaviour.
+        closePlayback();
+        audioRoute = ROUTE_XP;
+        appliedRoute = -1;
+        selectedQuality = -1;
         lstrcpynA(session, fields[2], sizeof(session));
         generation = 0;
         protocolVersion = fields[1][0] - '0';
@@ -684,6 +1356,23 @@ void handleLine(char* line) {
         }
         // Same session and generation, no audio purge, and stable voice slots.
         announceVoices();
+    } else if (!lstrcmpA(fields[0], "ROUTE") && count == 3 && protocolVersion == 2) {
+        // Only between utterances: changing SAPI's output object mid-speech
+        // would strand audio the host has already been promised.
+        if (speaking || assembling || routedCapture) { sendError("route-while-busy"); return; }
+        unsigned int wanted;
+        if (!lstrcmpA(fields[2], "xp")) wanted = ROUTE_XP;
+        else if (!lstrcmpA(fields[2], "nvda")) wanted = ROUTE_NVDA;
+        else if (!lstrcmpA(fields[2], "both")) wanted = ROUTE_BOTH;
+        else { sendError("invalid-route"); return; }
+        if (wanted != audioRoute) {
+            audioRoute = wanted;
+            appliedRoute = -1;
+            selectedQuality = -1;
+            if (wanted != ROUTE_BOTH) closePlayback();
+        }
+        wsprintfA(outgoing, "ROUTE\t%s\t%s", session, fields[2]);
+        sendLine(outgoing);
     } else if (!lstrcmpA(fields[0], "CANCEL") && count == 3) {
         unsigned int value;
         if (!parseNumber(fields[2], 2147483647, value)) { sendError("invalid-generation"); return; }
@@ -692,6 +1381,9 @@ void handleLine(char* line) {
         wsprintfA(outgoing, "CANCELLED\t%s\t%u", session, generation);
         sendLine(outgoing);
     } else if (!lstrcmpA(fields[0], "PAUSE") && count == 3) {
+        // SAPI's pause acts on its audio output. On the NVDA route that output
+        // is a memory stream, so pausing here is not known to hold the audio
+        // back; the host has to pause its own player as well. Untested.
         if (lstrcmpA(fields[2], "0") && lstrcmpA(fields[2], "1")) {
             sendError("invalid-pause");
             return;
@@ -754,6 +1446,8 @@ int runBridge() {
         return 1;
     }
     LocalFree(arguments);
+    // No C runtime startup runs, so anything with state is initialised here.
+    InitializeCriticalSection(&audioLock);
     HRESULT result = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (FAILED(result)) { logMessage("Unable to initialize COM."); return 1; }
     result = CoCreateInstance(CLSID_SpVoice, NULL, CLSCTX_INPROC_SERVER, IID_ISpVoice,
@@ -764,7 +1458,7 @@ int runBridge() {
     if (FAILED(voice->SetInterest(interest, interest))) { logMessage("Cannot receive SAPI completion events."); return 2; }
     if (!openSerial(port)) { logMessage("Cannot open configured COM port. Check VM serial settings and other bridge instances."); return 3; }
     SetConsoleCtrlHandler(onConsoleEvent, TRUE);
-    logMessage("Angel Legacy Voice Bridge 0.1.2-dev2. Waiting for the host. Ctrl+C exits.");
+    logMessage("Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits.");
 #ifdef ALVB_TEST_DROP_END_EVENTS
     logMessage("FAULT-INJECTION TEST ONLY: end events suppressed. Do not distribute this helper.");
 #endif
@@ -772,7 +1466,9 @@ int runBridge() {
     bool discardingLine = false;
     unsigned int serialErrors = 0;
     DWORD lastSerialError = 0;
-    char buffer[256];
+    // Larger than the original 256 bytes so control messages are not read a
+    // fragment at a time while captured audio is also crossing the link.
+    char buffer[1024];
     while (!stopping) {
         DWORD received = 0;
         if (!ReadFile(serialPort, buffer, sizeof(buffer), &received, NULL)) serialFault = true;
@@ -781,7 +1477,11 @@ int runBridge() {
             if (static_cast<DWORD>(now - lastSerialError) > 10000) serialErrors = 0;
             lastSerialError = now;
             stopSpeech();
+            closePlayback();
             session[0] = 0;
+            audioRoute = ROUTE_XP;
+            appliedRoute = -1;
+            selectedQuality = -1;
             used = 0;
             discardingLine = false;
             DWORD errors = 0;
@@ -816,14 +1516,21 @@ int runBridge() {
             DispatchMessageW(&message);
         }
         checkSpeechCompletion();
+        pumpCapturedAudio();
         if (session[0] && static_cast<DWORD>(GetTickCount() - lastContact) > HEARTBEAT_TIMEOUT) {
             stopSpeech();
+            closePlayback();
             session[0] = 0;
+            audioRoute = ROUTE_XP;
+            appliedRoute = -1;
+            selectedQuality = -1;
             logMessage("Host disconnected; old speech discarded. Waiting for reconnection.");
         }
     }
     stopSpeech();
+    closePlayback();
     CloseHandle(serialPort);
+    if (captureStream) captureStream->Release();
     for (unsigned int i = 0; i < voiceCount; ++i) {
         if (voices[i]) voices[i]->Release();
         CoTaskMemFree(voiceIds[i]);

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.2-dev3 — selectable bridge audio route, release still on hold
+
+- Keep XP as the SAPI voice host and add `XP speakers`, `Send to NVDA`, and
+  `Both XP and NVDA` routes for bridge speech. Other XP audio stays on XP.
+- Capture bounded 16-bit PCM across the serial link with per-utterance format,
+  bookmark offsets, cancel/pause handling, playback completion and capability
+  gates for older helpers. Fix two guest capture deadlocks/rebinding failures
+  found by real XP multi-utterance tests.
+- Require a real bookmark and non-silent captured PCM for optional automatic
+  return after fallback. XP captures and discards the check without local
+  playback, including for SAPI voices audible at volume zero. Older helpers
+  cannot run the check. Automatic return remains off by default.
+- Add audio-route protocol tests, real XP matrix results and updated help.
+  Retain the public release hold pending owner listening and freeze review.
+
 ## 0.1.2-dev2 — completion recovery, release still on hold
 
 - Clear abandoned NVDA speech/index queues before falling back to local speech,
