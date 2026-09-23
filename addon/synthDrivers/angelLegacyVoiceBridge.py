@@ -169,6 +169,13 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             if synthDriverHandler.setSynth("espeak"):
                 service.diagnostics().info("Fallback to local eSpeak succeeded; abandoned speech queue cleared")
                 service.arm_recovery(self.client, synthDriverHandler.getSynth(), saved)
+                # Focus speech can replace the spoken message. A short tone
+                # provides an independent audible indication of the switch.
+                try:
+                    import tones
+                    tones.beep(440, 150)
+                except Exception:
+                    service.diagnostics().warning("Fallback warning tone unavailable")
                 ui.message("Legacy bridge unavailable. Switched to local eSpeak.")
             else:
                 log.error("Legacy bridge unavailable; local eSpeak restoration failed")

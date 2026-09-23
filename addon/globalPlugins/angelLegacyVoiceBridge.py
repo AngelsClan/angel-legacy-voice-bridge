@@ -129,6 +129,9 @@ class BridgePanel(SettingsPanel):
         bridge_active = active and active.name == "angelLegacyVoiceBridge"
         connected = bool(client and client.connected)
         status = client.status if client else "Disabled / disconnected"
+        last_failure = getattr(client, "last_failure", "") if client else ""
+        if isinstance(last_failure, str) and last_failure:
+            status += "; last interruption: " + last_failure
         if connected:
             voices, tokens = client.voice_snapshot()
             status += f"; {len(voices)} voices; output: {client.output_format}"

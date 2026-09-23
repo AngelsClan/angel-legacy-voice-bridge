@@ -31,6 +31,9 @@ before delivering that bookmark, and still rejects a larger unexplained gap.
 Host playback pause now reaches NVDA's audio player immediately even when its
 worker is draining a prior chunk. XP-only pause still depends on the guest
 voice engine and sound output; users should check its audible timing.
+If the bridge falls back to eSpeak, it now requests a short warning tone as
+well as a spoken message. The settings status retains the last interruption
+reason after a reconnect.
 
 A serious NVDA freeze was reported against version 0.1.1 and the exact cause is
 still unconfirmed. Several real defects have been found and fixed since, but

@@ -283,6 +283,7 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(record[6:], (4, 106, 48000, 16, 20))
         self.assertNotIn("Private sentinel", repr(self.client.log.mock_calls))
         self.assertFalse(self.client._queue)
+        self.assertEqual(self.client.last_failure, "sapi-engine-failed")
 
     def test_failure_records_text_shape_but_never_text(self):
         from unittest.mock import Mock

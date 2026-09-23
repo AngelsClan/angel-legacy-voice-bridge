@@ -85,6 +85,7 @@ class BridgeClient:
         self._last_receive = 0
         self.connected = False
         self.status = "Not connected"
+        self.last_failure = ""
         self.generation = 0
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -277,6 +278,10 @@ class BridgeClient:
             self.connected = False
             self._connected_event.clear()
             self.status = reason
+            if was_connected:
+                # Keep the reason available after an automatic reconnect, so
+                # the settings status does not hide the interruption.
+                self.last_failure = reason[:160]
             self._queue.clear()
             self._commands.clear()
             self._active = None
