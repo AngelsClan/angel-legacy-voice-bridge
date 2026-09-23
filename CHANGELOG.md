@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2-dev4 — flush final bridge audio, release still on hold
+
+- Flush NVDA's audio player after XP completes a speech segment so the final
+  bookmark and completion reach NVDA's speech manager. This fixes reproduced
+  indefinite silence after labels such as "list" and "main landmark".
+- Verify final callbacks, cancellation during flush, a real XP segmented
+  sequence, and an isolated NVDA speech-manager run connected to XP.
+- Leave the XP helper unchanged; retain the public release hold pending owner
+  listening and review of the separate historical failures.
+
 ## 0.1.2-dev3 — selectable bridge audio route, release still on hold
 
 - Keep XP as the SAPI voice host and add `XP speakers`, `Send to NVDA`, and

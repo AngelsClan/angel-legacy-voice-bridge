@@ -235,7 +235,7 @@ class BridgePanel(SettingsPanel):
         self.onRefresh(None)
 
     def onAbout(self, event):
-        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev3\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Bridge speech can play through XP speakers, NVDA, or both. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
+        gui.messageBox("Angel Legacy Voice Bridge 0.1.2-dev4\nAngels Clan\n\nDiagnostic development build. Release is on hold after an unresolved NVDA freeze; keep reliable local speech selected. Use installed SAPI 5 voices in an offline XP VM. Bridge speech can play through XP speakers, NVDA, or both. Disconnect stops bridge speech and retries. Bounded text-free diagnostics also operate with the bridge disabled. No voices, network listener or Windows service are included. GPL version 2 or later. See help for safety, privacy and limitations.", "About Angel Legacy Voice Bridge")
 
     def isValid(self):
         name = self.pipe.GetValue().strip()

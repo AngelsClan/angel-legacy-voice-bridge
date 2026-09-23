@@ -1,5 +1,37 @@
 # Beta qualification
 
+## 0.1.2-dev4 missing-speech regression — 2026-09-23
+
+The owner observed that the Angel Legacy bridge said labels such as "list" and
+"main landmark" but sometimes never read the following content. IBM TTS read
+the same content completely. The bridge diagnostics showed a connected bridge
+and outstanding speech, rather than a failed guest connection. A separate
+desktop probe using NVDA's real WASAPI player reproduced the missing final
+bookmark and completion: both stayed pending for more than four seconds after
+audio was fed. Calling `WavePlayer.idle()` after the final callback feed
+delivered both in order. The host audio worker now makes that call when an
+utterance finishes. No change was made to the XP helper.
+
+The focused regression failed before the fix and passed afterward. Cancellation
+during the flush returned promptly and did not complete abandoned speech.
+The full host Python suite passed 174 tests and nine subtests. On the actual
+offline XP helper, segmented "list" then "first item" speech completed with
+both bookmarks for the NVDA and Both routes. A separate-desktop NVDA session
+loaded the candidate bridge, connected to real XP, read that two-part sequence
+through NVDA's speech manager, and ended with no pending speech backlog. This
+does not substitute for the owner's normal-use listening test.
+
+The exact packaged `0.1.2-dev4` add-on was then extracted into a fresh
+separate-desktop NVDA profile without a source overlay. It connected to the
+same XP helper, delivered the label and following item, and ended with
+`pending=(0, 0, 0)`. The package checker verified its archive boundaries and
+SHA-256. Add-on SHA-256:
+`4d85e8b12ecb5b6fac90fa9a9c02e83f32d4b66836ab1fc98dd5c55bbcf3347e`.
+
+The original NVDA freeze and separate Mac Lion Pipe Organ stall are still not
+proved resolved. Public release stays on hold. The installed dev3 XP helper
+remains valid with this dev4 host-only update.
+
 ## 0.1.2-dev3 audio-route development qualification — 2026-09-23
 
 The host unit suite passed 172 tests after the XP, NVDA and Both routes,

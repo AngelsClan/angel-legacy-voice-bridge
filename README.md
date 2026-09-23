@@ -23,7 +23,7 @@ This project was made with the help of AI.
 
 ## Current status: please read before installing
 
-**This is a development build (0.1.2-dev3) and the public release is on hold.**
+**This is a development build (0.1.2-dev4) and the public release is on hold.**
 
 A serious NVDA freeze was reported against version 0.1.1 and the exact cause is
 still unconfirmed. Several real defects have been found and fixed since, but

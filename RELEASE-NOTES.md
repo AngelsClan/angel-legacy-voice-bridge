@@ -1,6 +1,29 @@
 # Release notes
 
-## Current: 0.1.2-dev3 — development build, release on hold
+## Current: 0.1.2-dev4 — development build, release on hold
+
+This host add-on flushes NVDA's output player when XP finishes an utterance.
+Without that flush, the last bookmark and completion could remain pending, so
+NVDA would announce a structural label such as "list" or "main landmark" and
+never continue to its content. The fixed build completed that sequence through
+the real XP helper and an isolated NVDA session. The XP helper is unchanged
+from dev3; if it is already installed, only the host add-on needs updating.
+
+The owner still needs to listen to the installed build before this issue is
+considered closed in normal use. The separate historical freeze and Mac voice
+stall remain under review; public release remains on hold.
+
+### Install this development update
+
+1. Keep a reliable local synthesizer selected and disconnect the bridge.
+2. Install `AngelLegacyVoiceBridge-0.1.2-dev4.nvda-addon` and approve NVDA's
+   restart when ready.
+3. Select the bridge and test list and landmark navigation. The existing dev3
+   XP helper can stay running.
+
+The packages are unsigned. See `TEST-REPORT.md` for test limits and hashes.
+
+## Previous: 0.1.2-dev3 — development build, release on hold
 
 Bridge speech can now play through XP speakers, NVDA's selected output device,
 or both. XP remains the voice host and its other sounds keep using XP audio.

@@ -143,6 +143,13 @@ class AudioPlayback:
                         self._emit(epoch, "done", None)
                     else:
                         self._player.feed(None, 0, lambda token=epoch: self._emit(token, "done", None))
+                        # NVDA's WASAPI player may retain its final audio and
+                        # callbacks until idle() flushes the stream. Without
+                        # this, a trailing bookmark and done can both remain
+                        # pending, leaving the next speech sequence silent.
+                        # This is the audio worker, never NVDA's main thread;
+                        # stop() on cancel unblocks an interrupted idle().
+                        self._player.idle()
                 elif kind == "pause" and self._player is not None:
                     self._player.pause(value)
             except Exception as error:
