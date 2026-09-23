@@ -85,7 +85,17 @@ class AudioPlayback:
     def pause(self, paused):
         with self._lock:
             self._paused = bool(paused)
-        self._submit("pause", paused)
+            player = self._player
+        if player is not None:
+            # Like NVDA's own SAPI driver, pause the WASAPI player directly.
+            # Queueing this behind feed()/idle() lets speech continue until
+            # the whole segment has played. start() applies _paused to a new
+            # player if it was not constructed yet.
+            try:
+                player.pause(bool(paused))
+            except Exception:
+                # A concurrent cancel/voice change may already have closed it.
+                pass
 
     def close(self):
         self.cancel()
@@ -150,8 +160,6 @@ class AudioPlayback:
                         # This is the audio worker, never NVDA's main thread;
                         # stop() on cancel unblocks an interrupted idle().
                         self._player.idle()
-                elif kind == "pause" and self._player is not None:
-                    self._player.pause(value)
             except Exception as error:
                 self._emit(epoch, "error", type(error).__name__)
         player = self._player

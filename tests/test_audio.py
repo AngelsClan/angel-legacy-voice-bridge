@@ -129,6 +129,31 @@ class AudioPlaybackTests(unittest.TestCase):
         wait_for(lambda: self.players and self.players[0].items)
         self.assertEqual(self.players[0].items[0][:2], ("pause", True))
 
+    def test_pause_is_immediate_while_final_audio_is_draining(self):
+        self.audio.close()
+        self.players.clear()
+        self.events.clear()
+
+        def make_player(audio_format, device):
+            player = BlockingIdlePlayer(audio_format, device)
+            self.players.append(player)
+            return player
+
+        self.audio = AudioPlayback(lambda kind, value: self.events.append((kind, value)),
+                                   lambda: "chosen-device", make_player)
+        self.audio.start(AudioFormat(16000, 16, 1))
+        self.audio.feed(b"\x01\x00" * 4000)
+        self.audio.index(7)
+        self.audio.finish()
+        wait_for(lambda: self.players and self.players[0].entered.is_set())
+        began = time.monotonic()
+        self.audio.pause(True)
+        self.assertLess(time.monotonic() - began, .1)
+        self.assertIn(("pause", True, None), self.players[0].items)
+        self.audio.pause(False)
+        self.players[0].released.set()
+        wait_for(lambda: self.events == [("index", 7), ("done", None)])
+
     def test_last_bookmark_and_done_flush_when_player_needs_idle(self):
         self.audio.close()
         self.events.clear()

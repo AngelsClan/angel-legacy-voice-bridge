@@ -9,6 +9,7 @@
 
 <h2>Current status: please read first</h2>
 <p><strong>This is development build 0.1.2-dev4 and the public release is on hold.</strong> A serious NVDA freeze was reported against version 0.1.1 and the exact cause is still unconfirmed. Real defects have been found and fixed since, but none has been proven to be the cause.</p>
+<p>This build handles a measured few-byte SAPI bookmark offset after routed MacinTalk audio ends. It reports the bookmark after the real audio finishes and rejects larger unexplained gaps. NVDA-routed playback pause now reaches its audio player promptly even while the audio worker drains. XP-only pause still depends on the guest voice and sound output; check its audible timing on your setup.</p>
 <p>So keep a dependable local synthesizer selected as your normal speech, leave the bridge disabled unless you are deliberately testing it, and do not try to reproduce a freeze if losing speech would leave you stranded. The fixes and diagnostics in this build are not a promise that the problem is gone.</p>
 
 <h2>How it works</h2>

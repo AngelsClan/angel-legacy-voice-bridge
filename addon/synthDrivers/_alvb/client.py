@@ -407,7 +407,32 @@ class BridgeClient:
                         if self._audio_format is None or self._audio_bytes == 0:
                             raise ValueError("Routed speech produced no audio")
                         if self._route_marks:
-                            raise ValueError("Audio ended before bookmark offset")
+                            # Some MacinTalk SAPI voices place their terminal
+                            # bookmark a few bytes beyond the final PCM write
+                            # after SAPI resamples (observed: 1-8 bytes).
+                            # DONE proves the engine has finished. An observed
+                            # resampler tail is at most four mono PCM frames.
+                            # Bound the correction by eight output frames,
+                            # regardless of sample rate.
+                            tolerance = 8 * self._audio_format.channels * (self._audio_format.bits // 8)
+                            gap = max(offset - self._audio_bytes for offset, _ in self._route_marks)
+                            slot = self._active_details[0]
+                            if gap > tolerance:
+                                self.log.warning(
+                                    "Audio bookmark beyond final PCM: request=%d voice_slot=%d "
+                                    "offset=%d pcm_bytes=%d gap=%d tolerance=%d rate=%d frames=%d",
+                                    int(fields[3]), slot, max(offset for offset, _ in self._route_marks),
+                                    self._audio_bytes, gap, tolerance, self._audio_format.rate,
+                                    self._audio_sequence)
+                                raise ValueError("Audio ended before bookmark offset")
+                            self.log.info(
+                                "Terminal audio bookmark aligned to playback end: request=%d "
+                                "voice_slot=%d pcm_bytes=%d gap=%d rate=%d frames=%d",
+                                int(fields[3]), slot, self._audio_bytes, gap,
+                                self._audio_format.rate, self._audio_sequence)
+                            while self._route_marks:
+                                _, index = self._route_marks.popleft()
+                                self.audio.index(index)
                         self.audio.finish()
                         self._last_receive = time.monotonic()
                         return

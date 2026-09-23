@@ -192,6 +192,67 @@ class ClientTests(unittest.TestCase):
             self.client._process_line(["AUDIO", session, "4", "9", "1", "AQACAA=="])
         self.assertTrue(self.client.busy)
 
+    def test_tiny_terminal_bookmark_rounding_completes_at_real_audio_end(self):
+        self.client.close()
+        audio = Mock()
+        self.client.audio = audio
+        self.client.log = Mock()
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        session = self.client._session
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "48000", "16", "1"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "108"])
+        self.client._process_line(["AUDIO", session, "4", "9", "0",
+                                   base64.b64encode(bytes(100)).decode("ascii")])
+        audio.index.assert_not_called()
+        self.client._process_line(["DONE", session, "4", "9"])
+        audio.feed.assert_called_once_with(bytes(100))
+        audio.index.assert_called_once_with(7)
+        audio.finish.assert_called_once()
+        self.assertTrue(self.client.busy)  # Wait for the actual playback callback.
+        self.client.audio_event("index", 7)
+        self.client.audio_event("done", None)
+        self.assertFalse(self.client.busy)
+
+    def test_large_terminal_bookmark_gap_still_rejects_audio_loss(self):
+        self.client.close()
+        audio = Mock()
+        self.client.audio = audio
+        self.client.log = Mock()
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        session = self.client._session
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "48000", "16", "1"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "200"])
+        self.client._process_line(["AUDIO", session, "4", "9", "0",
+                                   base64.b64encode(bytes(100)).decode("ascii")])
+        with self.assertRaisesRegex(ValueError, "Audio ended before bookmark offset"):
+            self.client._process_line(["DONE", session, "4", "9"])
+        audio.index.assert_not_called()
+        audio.finish.assert_not_called()
+
+    def test_terminal_gap_limit_is_frames_even_at_low_sample_rate(self):
+        self.client.close()
+        audio = Mock()
+        self.client.audio = audio
+        self.client.log = Mock()
+        self.client._audio_supported = True
+        self.client._route_active = "nvda"
+        self.client._active = (4, 9, time.monotonic())
+        self.client._pending_indexes = deque([7])
+        session = self.client._session
+        self.client._process_line(["AUDIOFORMAT", session, "4", "9", "16000", "16", "1"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "118"])
+        self.client._process_line(["AUDIO", session, "4", "9", "0",
+                                   base64.b64encode(bytes(100)).decode("ascii")])
+        with self.assertRaisesRegex(ValueError, "Audio ended before bookmark offset"):
+            self.client._process_line(["DONE", session, "4", "9"])
+        audio.finish.assert_not_called()
+
     def test_late_audio_after_cancel_does_not_break_new_speech(self):
         self.client.close()
         self.client.audio = Mock()

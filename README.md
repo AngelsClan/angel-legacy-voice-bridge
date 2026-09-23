@@ -25,6 +25,13 @@ This project was made with the help of AI.
 
 **This is a development build (0.1.2-dev4) and the public release is on hold.**
 
+The current source handles the few-byte SAPI bookmark offset left by MacinTalk
+resampling at the end of routed audio. It waits for the real final PCM frame
+before delivering that bookmark, and still rejects a larger unexplained gap.
+Host playback pause now reaches NVDA's audio player immediately even when its
+worker is draining a prior chunk. XP-only pause still depends on the guest
+voice engine and sound output; users should check its audible timing.
+
 A serious NVDA freeze was reported against version 0.1.1 and the exact cause is
 still unconfirmed. Several real defects have been found and fixed since, but
 none of them has been proven to be *the* cause.
