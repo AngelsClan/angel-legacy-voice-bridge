@@ -79,7 +79,7 @@ def build_addon():
 def build_source():
     """Explicit source allowlist: never archive the workspace or local history."""
     destination = ROOT / "dist" / f"AngelLegacyVoiceBridge-{VERSION}-source.zip"
-    sources = [ROOT / name for name in ("build.py", "LICENSE", "README.md", "PROTOCOL.md",
+    sources = [ROOT / name for name in ("build.py", "LICENSE", "README.md", "PROTOCOL.md", "RATIONALE.md",
                                        "CHANGELOG.md", "PUBLICATION.md", "OPERATIONS.md", "TEST-REPORT.md", "RELEASE-NOTES.md", ".gitignore", ".gitattributes")]
     for folder in ("addon", "bridge", "tests", "tools"):
         sources.extend(path for path in (ROOT / folder).rglob("*")

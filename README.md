@@ -13,6 +13,10 @@ Everything stays on your computer. XP needs no internet connection, no network
 adapter, and no copy of NVDA inside it. **No voices are included** with this
 project; you supply your own licensed voices.
 
+Wondering why this exists at all, when Windows can host speech engines by
+itself? [RATIONALE.md](RATIONALE.md) answers that with specifics, including the
+cases where you should not use a bridge.
+
 This project was made with the help of AI.
 [Report a problem or ask a question](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues).
 
