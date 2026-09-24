@@ -1,109 +1,98 @@
 # Angel Legacy Voice Bridge
 
-Hear older Windows speech voices through modern NVDA without installing those
-voices on your main Windows computer.
+Use an older Windows speech voice with NVDA on your current PC. The voice stays
+inside your Windows XP virtual machine. The bridge sends it text and brings
+speech back to NVDA, or lets XP play the sound.
 
-The bridge has two parts. An **NVDA add-on** runs on your main computer. A small
-**helper** runs inside a Windows XP virtual machine, where you install your own
-licensed SAPI 5 voices. The add-on sends speech requests through a local
-virtual serial connection. The XP helper asks the selected voice to speak and
-reports speech progress back to NVDA. XP does not need an internet connection.
+**This is a development build (`0.1.2-dev4`), not a public release.** An
+earlier NVDA freeze has not been conclusively explained. Keep another NVDA
+voice available while testing. [Read the test results](TEST-REPORT.md).
 
-**Development status:** `0.1.2-dev4` is for testing. The public release is on
-hold while an earlier NVDA freeze remains unexplained. Keep a dependable local
-NVDA synthesizer available. [What has been tested](TEST-REPORT.md) and
-[known limits](docs/ADVANCED-GUIDE.md#known-limits) are documented separately.
+## Before you start
 
-## Which voice add-on do I need?
+You need:
 
-| If your voice... | Use... | Where the voice runs |
-| --- | --- | --- |
-| Is an older **Windows SAPI 5** voice that needs XP | Angel Legacy Voice Bridge | Inside the XP virtual machine |
-| Is a **Mac OS X MacinTalk** voice in a Lion, Snow Leopard, Leopard or Tiger Voices add-on | That generation's Mac voice add-on | Locally on the modern Windows computer |
-
-These are independent ways to use older voices. **The Mac voice add-ons do not
-need XP or this bridge.** The bridge can also use a MacinTalk voice *if that
-voice was separately installed as a SAPI 5 voice inside XP*, but the normal
-Mac voice add-ons run it locally. You can install both approaches if you want
-to compare them. Neither project includes a license for the voices.
-
-Angel Audio Keeper is a third, separate [NVDA add-on](https://github.com/AngelsClan/angel-audio-keeper).
-It keeps selected sound outputs active between sounds; it does not provide a
-voice or carry speech between computers.
-
-## What you need
-
-- NVDA on a modern Windows computer.
-- A working 32-bit Windows XP virtual machine with sound and a virtual serial
-  port. VirtualBox is the platform tested here.
-- Your own licensed SAPI 5 voices installed inside XP. SAPI 4-only voices do
+- NVDA on your current Windows PC.
+- A working **32-bit Windows XP** virtual machine in VirtualBox, with sound.
+- A **SAPI 5** voice installed and speaking inside XP. SAPI 4-only voices do
   not work with this bridge.
-- The XP helper program and the NVDA add-on from this project.
+- The bridge's XP helper program and NVDA add-on from the same build.
 
-The project supplies **no voices, Apple files, XP image, or voice licenses**.
-Nothing in the bridge needs XP networking. The serial connection stays on your
-computer; it is not an internet service.
+The project does not supply XP, voices, or voice licenses. XP does not need an
+internet connection; the two programs talk through a local virtual serial
+connection.
 
-## Set it up
+**Using the Lion, Snow Leopard, Leopard, or Tiger Mac voice add-on?** Those
+add-ons run voices on your current PC and do **not** require XP or this bridge.
+Use this bridge for voices installed as SAPI 5 voices inside XP.
 
-1. Make sure XP and the voice you want to use can already produce sound.
-2. Add a virtual serial port to XP and connect it to a Windows named pipe on
-   the main computer.
-3. Copy the bridge helper into XP and start it there.
-4. Install the bridge NVDA add-on on the main computer, then restart NVDA.
-5. In NVDA's **Preferences > Settings > Angel Legacy Voice Bridge**, enter
-   your own pipe name, connect, refresh the voice list, and use the fixed test
-   phrase before selecting the bridge as your synthesizer.
+## Get speech working
 
-The [step-by-step setup guide](docs/ADVANCED-GUIDE.md#installation) explains
-the virtual serial port, both programs, each setting, and troubleshooting.
-The pipe name and VM settings are chosen locally; no personal configuration is
-required by this repository.
+There are two small programs: `AngelLegacyVoiceBridge.exe` runs **inside XP**;
+`AngelLegacyVoiceBridge-<version>.nvda-addon` installs in **NVDA on your current
+PC**. Keep their versions together.
 
-## Where does the sound play?
+1. **Connect the VM.** With XP shut down, set VirtualBox's first serial port
+   to COM1, **Host Pipe**, and **create** the pipe. The example name is
+   `\\.\pipe\AngelLegacySpeech-XP`. Then start XP. [Exact VirtualBox fields
+   and a command are in the setup guide](docs/ADVANCED-GUIDE.md#step-1-add-a-virtual-serial-port-to-the-vm).
+2. **Start the XP helper.** Copy `AngelLegacyVoiceBridge.exe` into XP and run it.
+   Leave its window open. It should say that it is waiting for the host. [Ways
+   to copy it and common XP errors](docs/ADVANCED-GUIDE.md#step-2-put-the-helper-program-in-xp-and-run-it).
+3. **Install the NVDA add-on.** Open the `.nvda-addon` file on your current PC,
+   approve it in NVDA, and restart NVDA when you are ready. Keep a familiar
+   local voice selected until you have tested the bridge.
+4. **Hear a test.** Open NVDA's **Preferences > Settings > Legacy Voice Bridge**.
+   Check the pipe name, select **Enable bridge now**, and connect. Choose an XP
+   voice under **Mirror/test voice**, then press **Test speech through XP**. If
+   you hear the test, you can select **Angel Legacy Voice Bridge** as NVDA's
+   synthesizer with NVDA+Control+S. [Detailed first-test steps](docs/ADVANCED-GUIDE.md#step-4-connect-and-hear-your-first-test).
 
-In bridge settings, choose one speech route:
+The add-on can detect a single running bridge pipe for you. If it finds more
+than one, use **Detect running VM pipes** and choose the right one. The pipe
+name shown in NVDA must match the one in VirtualBox.
 
-- **XP:** speech plays through the virtual machine's sound output. This is the
-  usual starting point.
-- **NVDA:** the helper returns voice audio to NVDA, which plays it through
-  NVDA's selected output.
-- **Both:** speech plays on both outputs. The two copies can arrive at slightly
-  different times.
+## Choose where speech plays
 
-Other sounds made inside XP stay in XP. A successful connection only proves
-the two programs can talk; it does not prove that the voice or sound output is
-working. The test phrase checks the voice before you depend on it.
+In **Legacy Voice Bridge** settings, **Where XP bridge speech plays** offers:
 
-**Shift pauses and resumes** speech; **Control cancels** it. On the NVDA and
-Both routes, host playback pause reaches NVDA's audio player directly. On the
-XP route, audible pause timing also depends on the XP voice and sound buffer.
-If the bridge fails while selected, it tries to switch NVDA to local eSpeak,
-sounds a short tone, and announces the change. Settings retain the last
-interruption reason. A failed sound device may also make a warning inaudible.
+| Choice | What you hear |
+| --- | --- |
+| XP speakers | The XP virtual machine plays the voice. |
+| Send to NVDA | XP makes the voice audio; NVDA plays it on its selected output device. |
+| Both XP and NVDA | Both play it, a little out of step. |
 
-## Privacy and safety
+The voice engine still runs inside XP for every choice. Other XP sounds stay
+on XP's sound card. If speech works on one output but not another, check that
+output's device and volume. **Shift pauses or resumes** bridge speech; **Control
+cancels** it. XP-only pause timing also depends on the XP voice and its audio
+buffer.
 
-Speech text goes to the XP voice engine because that is how the bridge works.
-The bridge uses a local pipe, not a network account. Its own diagnostics are
-designed to omit speech text and window titles; they record timings, counters,
-error codes, and limited text shape. Review logs before sharing them. XP and
-its installed voice software remain your responsibility. Keeping an unsupported
-XP system offline is strongly recommended.
+You can also **mirror** speech: keep your normal NVDA voice and hear XP alongside
+it. [The guide explains mirror and synthesizer modes](docs/ADVANCED-GUIDE.md#step-5-choose-how-you-want-to-use-the-voices).
 
-The current source fixes measured terminal bookmark rounding after audio
-resampling and a host-side pause delay. Neither fix proves that every
-intermittent speech loss or the earlier NVDA freeze is resolved. Please report
-a problem with its approximate time, route, voice family, NVDA version and a
-redacted diagnostic log. You do not need to publish your pipe name or VM paths.
+## If the test fails
+
+| What you see or hear | First thing to check |
+| --- | --- |
+| No running bridge pipe found | Start XP and confirm its VirtualBox serial port is a Host Pipe in **create** mode. |
+| XP helper cannot open COM1 | Check the VM serial settings and close any second helper using COM1. |
+| Connected, but no voices listed | Confirm the voice speaks in XP and is registered as **SAPI 5**. |
+| Connected, voice listed, but silent | Use the Test button; check the selected XP or NVDA output device and volume. |
+| NVDA and Both unavailable | Update the XP helper to the matching build. |
+
+A connection proves that the two programs can talk; **the test phrase proves
+that a selected voice and audio route actually work**. The [full troubleshooting
+guide](docs/ADVANCED-GUIDE.md#troubleshooting) covers other errors. The bridge
+never needs your XP network connection or server credentials.
 
 ## More information
 
-- [Detailed setup, settings and troubleshooting](docs/ADVANCED-GUIDE.md)
-- [Technical rationale](RATIONALE.md)
-- [Test evidence and limits](TEST-REPORT.md)
-- [Wire protocol](PROTOCOL.md)
-- [Report an issue](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
+- [Detailed setup, updates, settings, and troubleshooting](docs/ADVANCED-GUIDE.md)
+- [What has been tested and what remains uncertain](TEST-REPORT.md)
+- [Why a bridge can help](RATIONALE.md)
+- [Privacy, safety, and known limits](docs/ADVANCED-GUIDE.md#privacy-and-security)
+- [Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
 
-Panthera speech and other MacinTalk work are separate projects. This bridge
-is GPL-2.0-or-later; see [LICENSE](LICENSE). Development used AI assistance.
+The bridge is GPL-2.0-or-later; see [LICENSE](LICENSE). Development used AI
+assistance.

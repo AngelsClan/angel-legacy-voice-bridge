@@ -209,7 +209,7 @@ sounds still play.
 3. A console window opens and prints:
 
    ```text
-   Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits.
+   Angel Legacy Voice Bridge 0.1.2-dev4. Waiting for the host. Ctrl+C exits.
    ```
 
    Leave it open and Alt+Tab away, or minimize it. Control+C closes it. Later,
