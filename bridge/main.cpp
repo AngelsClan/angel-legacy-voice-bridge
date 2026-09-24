@@ -54,6 +54,7 @@ bool serialFault = false;
 unsigned int protocolVersion = 1;
 bool assembling = false;
 bool batchSpeech = false;
+bool endInputSeen = false;
 ULONG activeStream = 0;
 unsigned int batchVoice = 0;
 unsigned int batchQuality = 0;
@@ -68,7 +69,7 @@ DWORD lastContact = 0;
 char incoming[MAX_LINE];
 char outgoing[MAX_LINE];
 WCHAR speechText[MAX_TEXT];
-WCHAR speechXml[MAX_TEXT * 6 + 100];
+WCHAR speechXml[MAX_TEXT * 16 + 100];
 
 // Audio capture state. Only the ring and the sink counters are touched by the
 // SAPI rendering thread; everything else belongs to the single main loop.
@@ -105,7 +106,9 @@ ULONGLONG sinkWritten = 0;
 ULONGLONG sinkPosition = 0;
 unsigned int seekAnomalies = 0;
 unsigned int writeTimeouts = 0;
+volatile LONG sinkWriteAborts = 0;
 volatile LONG captureAbort = 1;
+volatile LONG captureAbortReason = 0;
 
 // Local playback of the captured PCM, used only by the Both route. This opens
 // one ordinary wave output stream; it never touches the mixer, never mutes and
@@ -275,14 +278,17 @@ void captureRewind() {
     sinkPosition = 0;
     seekAnomalies = 0;
     writeTimeouts = 0;
+    InterlockedExchange(&sinkWriteAborts, 0);
     LeaveCriticalSection(&audioLock);
     audioSequence = 0;
     audioFormatSent = false;
+    InterlockedExchange(&captureAbortReason, 0);
     InterlockedExchange(&captureAbort, 0);
 }
 
 // Release a blocked rendering thread before anything waits on SAPI itself.
-void captureAbortNow() {
+void captureAbortNow(LONG reason) {
+    InterlockedExchange(&captureAbortReason, reason);
     InterlockedExchange(&captureAbort, 1);
     EnterCriticalSection(&audioLock);
     ringStart = 0;
@@ -345,7 +351,10 @@ HRESULT STDMETHODCALLTYPE sinkWrite(AudioSink*, const void* data, ULONG count, U
     ULONG done = 0;
     DWORD waitingSince = GetTickCount();
     while (done < count) {
-        if (captureAbort) return E_ABORT;
+        if (captureAbort) {
+            InterlockedIncrement(&sinkWriteAborts);
+            return E_ABORT;
+        }
         EnterCriticalSection(&audioLock);
         unsigned int room = AUDIO_RING - ringUsed;
         unsigned int chunk = count - done < room ? count - done : room;
@@ -525,10 +534,10 @@ bool playCapturedAudio(const char* data, unsigned int length) {
     return true;
 }
 
-void stopSpeech() {
+void stopSpeech(LONG reason = 1) {
     // Free the rendering thread first: it may be waiting for ring space, and
     // purging SAPI waits for that same thread to unwind.
-    captureAbortNow();
+    captureAbortNow(reason);
     // Cancellation must silence what the Both route has already queued.
     resetPlayback();
     if (voice) {
@@ -539,6 +548,7 @@ void stopSpeech() {
     speaking = false;
     assembling = false;
     batchSpeech = false;
+    endInputSeen = false;
     xmlUsed = 0;
     styleOpen = false;
 }
@@ -551,13 +561,17 @@ void sendError(const char* code) {
 
 // Fixed numeric diagnostics only: never retain utterances, token paths or names.
 // Keep a small helper-side record even when an older add-on ignores SAPIERROR.
-void reportSapiFailure(unsigned int stage, HRESULT result, unsigned int slot, unsigned int quality) {
+void reportSapiFailure(unsigned int stage, HRESULT result, unsigned int slot, unsigned int quality,
+                       const SPVOICESTATUS* status = NULL, LONG abortBefore = -1,
+                       LONG sinkAbortsBefore = -1, LONG abortReasonBefore = -1) {
     SYSTEMTIME now;
     GetLocalTime(&now);
     char record[256];
-    wsprintfA(record, "%04u-%02u-%02u %02u:%02u:%02u stage=%u HRESULT=%08lX voice_slot=%u quality=%u\r\n",
+    wsprintfA(record, "%04u-%02u-%02u %02u:%02u:%02u stage=%u HRESULT=%08lX voice_slot=%u quality=%u route=%u write_timeouts=%u seeks=%u stream=%lu capture_abort=%ld abort_reason=%ld sink_aborts=%ld current_stream=%lu last_queued=%lu\r\n",
               now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
-              stage, static_cast<DWORD>(result), slot, quality);
+              stage, static_cast<DWORD>(result), slot, quality, audioRoute,
+              writeTimeouts, seekAnomalies, activeStream, abortBefore, abortReasonBefore, sinkAbortsBefore,
+              status ? status->ulCurrentStream : 0, status ? status->ulLastStreamQueued : 0);
     WCHAR path[MAX_PATH];
     DWORD length = GetModuleFileNameW(NULL, path, MAX_PATH);
     if (length && length < MAX_PATH) {
@@ -752,11 +766,20 @@ void announceVoices() {
 }
 
 // Only these generated tags are allowed. User text is always XML-escaped.
-void makeSpeechXml(unsigned int pitch, bool spell) {
-    wsprintfW(speechXml, L"<pitch absmiddle=\"%d\">", static_cast<int>(pitch) - 10);
+void makeSpeechXml(unsigned int pitch, unsigned int volume, bool spell) {
+    // Keep the SAPI master volume open. A cold engine can accept Speak at
+    // master volume zero and then report E_ABORT asynchronously. The batch
+    // protocol already applies per-request volume in XML and does not hit
+    // that failure; use the same path for legacy SPEAK.
+    wsprintfW(speechXml, L"<volume level=\"%u\"><pitch absmiddle=\"%d\">",
+              volume, static_cast<int>(pitch) - 10);
     if (spell) lstrcatW(speechXml, L"<spell>");
     for (const WCHAR* next = speechText; *next; ++next) {
-        if (*next == L'&') lstrcatW(speechXml, L"&amp;");
+        // Pipe Organ's XP SAPI engine accepts a raw '!' and then fails the
+        // stream asynchronously. An isolated CDATA text node preserves the
+        // mark and survived 100 direct SAPI requests without slowing speech.
+        if (*next == L'!') lstrcatW(speechXml, L"<![CDATA[!]]>");
+        else if (*next == L'&') lstrcatW(speechXml, L"&amp;");
         else if (*next == L'<') lstrcatW(speechXml, L"&lt;");
         else if (*next == L'>') lstrcatW(speechXml, L"&gt;");
         else {
@@ -766,7 +789,7 @@ void makeSpeechXml(unsigned int pitch, bool spell) {
         }
     }
     if (spell) lstrcatW(speechXml, L"</spell>");
-    lstrcatW(speechXml, L"</pitch>");
+    lstrcatW(speechXml, L"</pitch></volume>");
 }
 
 HRESULT selectVoice(unsigned int slot) {
@@ -854,8 +877,9 @@ void speakCommand(char** fields, unsigned int count) {
     }
     HRESULT result = selectVoice(voiceIndex);
     if (SUCCEEDED(result)) result = voice->SetRate(static_cast<int>(rate) - 10);
-    if (SUCCEEDED(result)) result = voice->SetVolume(static_cast<USHORT>(volume));
-    makeSpeechXml(pitch, spell != 0);
+    if (SUCCEEDED(result)) result = voice->SetVolume(100);
+    makeSpeechXml(pitch, volume, spell != 0);
+    endInputSeen = false;
     if (SUCCEEDED(result)) result = speakXml(voiceIndex, speechXml, NULL);
     if (FAILED(result)) { sendError("sapi-speak-failed"); return; }
     speaking = true;
@@ -890,7 +914,8 @@ bool appendSpeechPart(unsigned int rate, unsigned int volume, unsigned int pitch
         styleOpen = true;
     }
     for (const WCHAR* next = speechText; *next; ++next) {
-        if (*next == L'&') { if (!appendXml(L"&amp;")) return false; }
+        if (*next == L'!') { if (!appendXml(L"<![CDATA[!]]>")) return false; }
+        else if (*next == L'&') { if (!appendXml(L"&amp;")) return false; }
         else if (*next == L'<') { if (!appendXml(L"&lt;")) return false; }
         else if (*next == L'>') { if (!appendXml(L"&gt;")) return false; }
         else {
@@ -1163,7 +1188,7 @@ void batchCommand(char** fields, unsigned int count) {
         // utterance cannot still be draining here. If it ever were, abandon it
         // rather than let its tail and sequence numbers run into this one.
         if (pendingDone) {
-            captureAbortNow();
+            captureAbortNow(2); // previous routed audio was still pending
             logMessage("A new utterance arrived before the previous audio finished; the remainder was dropped.");
         }
         batchProbe = probeFlag != 0;
@@ -1208,12 +1233,13 @@ void batchCommand(char** fields, unsigned int count) {
             if (SUCCEEDED(result)) { stage = 2; result = applyOutput(batchVoice, batchQuality); }
             if (SUCCEEDED(result)) { stage = 3; result = voice->SetRate(0); }
             if (SUCCEEDED(result)) { stage = 4; result = voice->SetVolume(100); }
+            endInputSeen = false;
             if (SUCCEEDED(result) && xmlUsed) {
                 stage = 5;
                 result = speakXml(batchVoice, utteranceXml, &activeStream);
             }
             if (FAILED(result)) {
-                captureAbortNow();
+                captureAbortNow(3); // synchronous SAPI setup/speak failure
                 reportSapiFailure(stage, result, batchVoice, batchQuality);
                 sendError("batch-speak-failed"); return;
             }
@@ -1240,10 +1266,15 @@ void finishSpeech() {
     HRESULT result = voice->GetStatus(&status, NULL);
     speaking = false;
     batchSpeech = false;
+    endInputSeen = false;
     if (FAILED(result) || FAILED(status.hrLastResult)) {
-        captureAbortNow();
+        LONG abortBefore = InterlockedCompareExchange(&captureAbort, 0, 0);
+        LONG abortReasonBefore = InterlockedCompareExchange(&captureAbortReason, 0, 0);
+        LONG sinkAbortsBefore = InterlockedCompareExchange(&sinkWriteAborts, 0, 0);
+        captureAbortNow(4); // asynchronous SAPI failure
         reportSapiFailure(FAILED(result) ? 6 : 7, FAILED(result) ? result : status.hrLastResult,
-                          selectedVoice < 0 ? MAX_VOICES : selectedVoice, batchQuality);
+                          selectedVoice < 0 ? MAX_VOICES : selectedVoice, batchQuality,
+                          &status, abortBefore, sinkAbortsBefore, abortReasonBefore);
         sendError("sapi-engine-failed");
         return;
     }
@@ -1273,7 +1304,7 @@ void speechEvents() {
                 sendLine(outgoing);
             } else if (event.eEventId == SPEI_END_INPUT_STREAM) {
 #ifndef ALVB_TEST_DROP_END_EVENTS
-                finishSpeech();
+                endInputSeen = true;
 #endif
             }
         }
@@ -1283,9 +1314,11 @@ void speechEvents() {
 }
 
 void checkSpeechCompletion() {
-    // Drain bookmarks first. WaitUntilDone(0) polls actual SAPI completion;
-    // it does not guess duration or cut off a slow/paused voice. This also
-    // covers skipped text when an engine omits END_INPUT_STREAM.
+    // Drain bookmarks first. END_INPUT_STREAM can arrive before SAPI's output
+    // thread has fully released the voice. Telling the host DONE at that event
+    // lets a new request enter the old engine's teardown and occasionally
+    // returns E_FAIL on the following stream. WaitUntilDone(0) confirms actual
+    // completion, even when the engine never emits an END event.
     speechEvents();
     if (!speaking || paused) return;
     HRESULT result = voice->WaitUntilDone(0);
@@ -1293,13 +1326,13 @@ void checkSpeechCompletion() {
         // Events can arrive between the first drain and the completion poll.
         speechEvents();
         if (!speaking) return;
-        if (batchSpeech) {
+        if (batchSpeech && !endInputSeen) {
             wsprintfA(outgoing, "NOTICE\t%s\t%u\t%u\tcompletion-polled", session, generation, requestId);
             sendLine(outgoing);
         }
         finishSpeech();
     } else if (FAILED(result)) {
-        stopSpeech();
+        stopSpeech(11); // completion poll itself failed
         sendError("sapi-completion-failed");
     }
 }
@@ -1316,7 +1349,7 @@ void handleLine(char* line) {
     }
     if (count == 3 && !lstrcmpA(fields[0], "HELLO") &&
         (!lstrcmpA(fields[1], "1") || !lstrcmpA(fields[1], "2")) && validSession(fields[2])) {
-        stopSpeech();
+        stopSpeech(12); // new session
         // Every connection starts on the XP sound card, so an add-on that does
         // not know about routing inherits exactly the old behaviour.
         closePlayback();
@@ -1376,7 +1409,7 @@ void handleLine(char* line) {
     } else if (!lstrcmpA(fields[0], "CANCEL") && count == 3) {
         unsigned int value;
         if (!parseNumber(fields[2], 2147483647, value)) { sendError("invalid-generation"); return; }
-        stopSpeech();
+        stopSpeech(13); // explicit host cancellation
         generation = value;
         wsprintfA(outgoing, "CANCELLED\t%s\t%u", session, generation);
         sendLine(outgoing);
@@ -1476,7 +1509,7 @@ int runBridge() {
             DWORD now = GetTickCount();
             if (static_cast<DWORD>(now - lastSerialError) > 10000) serialErrors = 0;
             lastSerialError = now;
-            stopSpeech();
+            stopSpeech(14); // serial transport fault
             closePlayback();
             session[0] = 0;
             audioRoute = ROUTE_XP;
@@ -1518,7 +1551,7 @@ int runBridge() {
         checkSpeechCompletion();
         pumpCapturedAudio();
         if (session[0] && static_cast<DWORD>(GetTickCount() - lastContact) > HEARTBEAT_TIMEOUT) {
-            stopSpeech();
+            stopSpeech(15); // heartbeat expiration
             closePlayback();
             session[0] = 0;
             audioRoute = ROUTE_XP;

@@ -2,12 +2,23 @@
 
 ## Current: 0.1.2-dev4 — development build, release on hold
 
-This host add-on flushes NVDA's output player when XP finishes an utterance.
+This same-version development revision updates both the XP helper and host
+add-on. The XP helper now encodes literal exclamation marks in generated SAPI
+XML as CDATA text nodes. A Pipe Organ phrase starting with a raw `!` caused an
+asynchronous SAPI failure on XP, including in a direct test outside the bridge;
+the corrected form passed repeated direct and bridge tests. The helper also
+waits for engine completion after input ends and writes more detailed numeric
+failure diagnostics without recording speech text. Legacy SPEAK volume now
+uses XML volume, avoiding a master-volume-zero engine failure.
+
+The host add-on permits a measured sub-millisecond bookmark lead after 48 kHz
+resampling without treating it as missing PCM. It still rejects larger gaps.
+
+The earlier dev4 host add-on flushes NVDA's output player when XP finishes an utterance.
 Without that flush, the last bookmark and completion could remain pending, so
 NVDA would announce a structural label such as "list" or "main landmark" and
 never continue to its content. The fixed build completed that sequence through
-the real XP helper and an isolated NVDA session. The XP helper is unchanged
-from dev3; if it is already installed, only the host add-on needs updating.
+the real XP helper and an isolated NVDA session.
 
 The owner still needs to listen to the installed build before this issue is
 considered closed in normal use. The separate historical freeze and Mac voice
@@ -16,10 +27,12 @@ stall remain under review; public release remains on hold.
 ### Install this development update
 
 1. Keep a reliable local synthesizer selected and disconnect the bridge.
-2. Install `AngelLegacyVoiceBridge-0.1.2-dev4.nvda-addon` and approve NVDA's
-   restart when ready.
-3. Select the bridge and test list and landmark navigation. The existing dev3
-   XP helper can stay running.
+2. Stop the XP helper, replace it with this revision's `AngelLegacyVoiceBridge.exe`,
+   and start the new helper.
+3. Install this revision's `AngelLegacyVoiceBridge-0.1.2-dev4.nvda-addon` and
+   approve NVDA's restart when ready.
+4. Select the bridge and test list and landmark navigation, voice changes, and
+   speech containing punctuation.
 
 The packages are unsigned. See `TEST-REPORT.md` for test limits and hashes.
 

@@ -1,5 +1,33 @@
 # Beta qualification
 
+## 0.1.2-dev4 XP SAPI input revision — 2026-09-23
+
+The XP helper's Pipe Organ voice failed asynchronously with SAPI `E_FAIL` on
+the second direct `SAPI.SpVoice` request when generated XML text began with a
+raw exclamation mark. The phrase without that mark completed 100/100 direct
+requests. An XML character reference and an isolated CDATA node each completed
+100/100 direct requests; CDATA retained the shorter audio duration in the
+direct comparison. This isolates the trigger to an XP voice/SAPI/XML input
+interaction, without claiming that every possible engine failure is removed.
+
+The revised helper puts literal `!` characters in isolated CDATA text nodes.
+On real XP, 100/100 repeated leading-mark Pipe Organ speaker requests
+completed. Mixed punctuation and Unicode phrases completed 20 rounds / 40
+utterances on the XP speaker route and 20 rounds / 40 utterances with 48 kHz
+captured PCM. Both runs checked ordered bookmarks and completion. Captured
+audio was non-silent, but was counted by a test sink rather than listened to.
+All 29 installed SAPI voices passed a default-quality switch and bookmark
+request; interrupted switching passed across all 29 too. Five leading-mark
+requests passed again after the tested helper was installed at its regular XP
+path. The regular XP executable was copied back and its SHA-256 matched the
+packaged helper exactly.
+
+The host Python suite passed 178 tests and nine subtests. The archive and hash
+checker passed after packaging. These tests do not establish crackle-free
+audibility, days of continuous speech, or resolution of the earlier NVDA
+freeze. The separate native Mac voice add-on has its own open issues. Public
+release remains on hold pending owner listening and review.
+
 ## 0.1.2-dev4 missing-speech regression — 2026-09-23
 
 The owner observed that the Angel Legacy bridge said labels such as "list" and

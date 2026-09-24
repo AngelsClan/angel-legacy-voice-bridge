@@ -412,14 +412,16 @@ class BridgeClient:
                         if self._audio_format is None or self._audio_bytes == 0:
                             raise ValueError("Routed speech produced no audio")
                         if self._route_marks:
-                            # Some MacinTalk SAPI voices place their terminal
-                            # bookmark a few bytes beyond the final PCM write
-                            # after SAPI resamples (observed: 1-8 bytes).
-                            # DONE proves the engine has finished. An observed
-                            # resampler tail is at most four mono PCM frames.
-                            # Bound the correction by eight output frames,
-                            # regardless of sample rate.
-                            tolerance = 8 * self._audio_format.channels * (self._audio_format.bits // 8)
+                            # SAPI's terminal bookmark can lead the final PCM
+                            # after resampling. XP Organ at 48 kHz produced a
+                            # measured 32-byte (16-frame, 0.33 ms) lead; eight
+                            # frames falsely disconnected the NVDA route.
+                            # DONE proves rendering has finished. Allow at most
+                            # one millisecond of output frames, keeping a real
+                            # missing-audio tail an error.
+                            tolerance_frames = max(8, (self._audio_format.rate + 999) // 1000)
+                            tolerance = (tolerance_frames * self._audio_format.channels
+                                         * (self._audio_format.bits // 8))
                             gap = max(offset - self._audio_bytes for offset, _ in self._route_marks)
                             slot = self._active_details[0]
                             if gap > tolerance:

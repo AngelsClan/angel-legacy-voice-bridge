@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.2-dev4 — XP SAPI input and routed-audio correction, release still on hold
+
+- Preserve literal exclamation marks in generated SAPI XML using isolated CDATA
+  text nodes. A repeated Pipe Organ phrase beginning with a raw `!` made XP's
+  SAPI engine report an asynchronous failure even in a direct SAPI test; the
+  CDATA form completed 100 direct requests and 100 bridge speaker requests.
+- Wait for SAPI completion after the input stream ends, and record numeric
+  failure state in the XP helper diagnostics without logging speech text.
+- Apply legacy SPEAK volume in XML while keeping SAPI's master volume open.
+  This avoids the engine failure seen when master volume was set to zero.
+- Permit a measured sub-millisecond terminal bookmark lead after 48 kHz
+  resampling. Larger missing PCM tails still fail the NVDA audio route.
+- Test the updated helper on XP with both speaker and NVDA-captured routes,
+  mixed punctuation, voice changes, cancellation, and bookmarks. Keep the
+  public release on hold pending normal-use listening and the earlier freeze.
+
 ## 0.1.2-dev4 — flush final bridge audio, release still on hold
 
 - Flush NVDA's audio player after XP completes a speech segment so the final
@@ -7,8 +23,8 @@
   indefinite silence after labels such as "list" and "main landmark".
 - Verify final callbacks, cancellation during flush, a real XP segmented
   sequence, and an isolated NVDA speech-manager run connected to XP.
-- Leave the XP helper unchanged; retain the public release hold pending owner
-  listening and review of the separate historical failures.
+- At the time of this earlier dev4 update, the XP helper was unchanged. A
+  later dev4 source revision above updates both components without a version bump.
 
 ## 0.1.2-dev3 — selectable bridge audio route, release still on hold
 
