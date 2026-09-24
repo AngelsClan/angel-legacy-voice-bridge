@@ -418,10 +418,12 @@ class BridgeClient:
                             # after resampling. XP Organ at 48 kHz produced a
                             # measured 32-byte (16-frame, 0.33 ms) lead; eight
                             # frames falsely disconnected the NVDA route.
+                            # An XP Eloquence phrase produced a 97-byte lead
+                            # at 48 kHz, one byte over the former 1 ms limit.
                             # DONE proves rendering has finished. Allow at most
-                            # one millisecond of output frames, keeping a real
+                            # two milliseconds of output frames, keeping a real
                             # missing-audio tail an error.
-                            tolerance_frames = max(8, (self._audio_format.rate + 999) // 1000)
+                            tolerance_frames = max(8, (self._audio_format.rate * 2 + 999) // 1000)
                             tolerance = (tolerance_frames * self._audio_format.channels
                                          * (self._audio_format.bits // 8))
                             gap = max(offset - self._audio_bytes for offset, _ in self._route_marks)

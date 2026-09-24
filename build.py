@@ -50,7 +50,7 @@ def build_bridge(test_drop_end_events=False):
     subprocess.run([str(link), "/NOLOGO", "/NODEFAULTLIB", "/MACHINE:X86", "/SUBSYSTEM:CONSOLE,5.01",
                     "/ENTRY:bridgeEntry", "/DYNAMICBASE", "/NXCOMPAT", "/OUT:" + str(executable),
                     str(output / "main.obj"), str(output / "runtime.obj"),
-                    "kernel32.lib", "ole32.lib", "user32.lib", "shell32.lib", "sapi.lib", "winmm.lib"], env=environment, check=True)
+                    "kernel32.lib", "ole32.lib", "user32.lib", "shell32.lib", "advapi32.lib", "sapi.lib", "winmm.lib"], env=environment, check=True)
     return executable
 
 

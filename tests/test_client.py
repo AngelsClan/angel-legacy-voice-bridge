@@ -203,7 +203,7 @@ class ClientTests(unittest.TestCase):
         self.client._pending_indexes = deque([7])
         session = self.client._session
         self.client._process_line(["AUDIOFORMAT", session, "4", "9", "48000", "16", "1"])
-        self.client._process_line(["INDEX", session, "4", "9", "7", "132"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "197"])
         self.client._process_line(["AUDIO", session, "4", "9", "0",
                                    base64.b64encode(bytes(100)).decode("ascii")])
         audio.index.assert_not_called()
@@ -227,7 +227,7 @@ class ClientTests(unittest.TestCase):
         self.client._pending_indexes = deque([7])
         session = self.client._session
         self.client._process_line(["AUDIOFORMAT", session, "4", "9", "48000", "16", "1"])
-        self.client._process_line(["INDEX", session, "4", "9", "7", "200"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "400"])
         self.client._process_line(["AUDIO", session, "4", "9", "0",
                                    base64.b64encode(bytes(100)).decode("ascii")])
         with self.assertRaisesRegex(ValueError, "Audio ended before bookmark offset"):
@@ -235,7 +235,7 @@ class ClientTests(unittest.TestCase):
         audio.index.assert_not_called()
         audio.finish.assert_not_called()
 
-    def test_terminal_gap_limit_is_one_millisecond_even_at_low_sample_rate(self):
+    def test_terminal_gap_limit_is_two_milliseconds_even_at_low_sample_rate(self):
         self.client.close()
         audio = Mock()
         self.client.audio = audio
@@ -246,7 +246,7 @@ class ClientTests(unittest.TestCase):
         self.client._pending_indexes = deque([7])
         session = self.client._session
         self.client._process_line(["AUDIOFORMAT", session, "4", "9", "16000", "16", "1"])
-        self.client._process_line(["INDEX", session, "4", "9", "7", "134"])
+        self.client._process_line(["INDEX", session, "4", "9", "7", "170"])
         self.client._process_line(["AUDIO", session, "4", "9", "0",
                                    base64.b64encode(bytes(100)).decode("ascii")])
         with self.assertRaisesRegex(ValueError, "Audio ended before bookmark offset"):

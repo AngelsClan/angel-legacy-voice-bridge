@@ -1,7 +1,6 @@
 """NVDA-facing connection ownership. All NVDA callbacks run on its UI thread."""
 import config
 import queueHandler
-import ui
 import time
 import threading
 from collections import deque
@@ -25,7 +24,6 @@ SPEC = {
     "quality": "integer(default=0)",
     "speechRoute": "string(default='xp')",
     "diagnostics": "boolean(default=True)",
-    "announceStatus": "boolean(default=True)",
 }
 diagnostics_enabled = True
 client = None
@@ -42,7 +40,6 @@ monitor_stopped = None
 monitor_thread = None
 last_backlog_counts = None
 diagnostic_failure_reported = False
-announced_connection = None
 
 
 def _diagnostic_tick(event, data):
@@ -368,7 +365,6 @@ def settings():
 
 
 def _deliver(source, event, data):
-    global announced_connection
     if client is not source:
         return
     if event == "connected" and not source.connected:
@@ -380,17 +376,6 @@ def _deliver(source, event, data):
     if event in ("connected", "disconnected"):
         log.info("Legacy Voice Bridge: %s", event)
         diagnostics().info("Lifecycle: %s", event)
-        # This callback is on NVDA's main thread. Keep the message on the
-        # selected local synthesizer when the bridge is only running in the
-        # background; a bridge-selected failure already has its own fallback.
-        previous = announced_connection
-        change = (source, event == "connected")
-        announced_connection = change
-        if settings()["announceStatus"] and change != previous and (event == "connected" or previous == (source, True)):
-            import synthDriverHandler
-            selected = synthDriverHandler.getSynth()
-            if selected is None or selected.name != "angelLegacyVoiceBridge":
-                ui.message("XP voice bridge " + event)
     global testing
     if event in ("done", "disconnected"):
         finish_test()
@@ -443,12 +428,11 @@ def ensure_client(wait=0):
 
 
 def stop():
-    global client, retiring_worker, testing, announced_connection
+    global client, retiring_worker, testing
     testing = False
     clear_recovery()
     old = client
     client = None
-    announced_connection = None
     if old is not None:
         retiring_worker = old.closed_event
         retiring_workers[:] = [event for event in retiring_workers if not event.is_set()]

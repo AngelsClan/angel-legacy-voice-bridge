@@ -101,10 +101,9 @@ that a selected voice and audio route actually work**. The [full troubleshooting
 guide](docs/ADVANCED-GUIDE.md#troubleshooting) covers other errors. The bridge
 never needs your XP network connection or server credentials.
 
-The settings also offer **Announce bridge connection changes through NVDA**,
-enabled by default. When the bridge is running behind a local synthesizer,
-NVDA says when it connects or disconnects. You can turn the announcements off
-without changing speech routing or automatic recovery.
+An optional XP NVDA companion can announce connection changes and remind you
+when the bridge remains disconnected. Those messages play through the
+synthesizer selected **inside XP**. They do not run through this host add-on.
 
 ## More information
 

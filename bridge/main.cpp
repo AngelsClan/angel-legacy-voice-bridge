@@ -67,6 +67,21 @@ bool visibleTextStarted = false;
 unsigned int styleRate = 10, styleVolume = 100, stylePitch = 10, styleSpell = 0;
 volatile LONG stopping = 0;
 DWORD lastContact = 0;
+
+// Local XP NVDA can read this heartbeat without owning the virtual COM port.
+// It contains only connection state and a tick count, never speech or IDs.
+void publishLocalStatus(bool connected) {
+    HKEY key = NULL;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\AngelLegacyVoiceBridge", 0, NULL,
+                        0, KEY_SET_VALUE, NULL, &key, NULL) != ERROR_SUCCESS) return;
+    const DWORD state = connected ? 1 : 0;
+    const DWORD tick = GetTickCount();
+    RegSetValueExW(key, L"Connected", 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&state), sizeof(state));
+    RegSetValueExW(key, L"LastContactTick", 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&tick), sizeof(tick));
+    RegCloseKey(key);
+}
 char incoming[MAX_LINE];
 char outgoing[MAX_LINE];
 WCHAR speechText[MAX_TEXT];
@@ -1385,12 +1400,14 @@ void handleLine(char* line) {
         generation = 0;
         protocolVersion = fields[1][0] - '0';
         lastContact = GetTickCount();
+        publishLocalStatus(true);
         announceVoices();
         logMessage("Bridge connected. Audio plays through the XP default output.");
         return;
     }
     if (count < 2 || !session[0] || lstrcmpA(fields[1], session)) return;
     lastContact = GetTickCount();
+    if (!lstrcmpA(fields[0], "PING")) publishLocalStatus(true);
     if (!lstrcmpA(fields[0], "PING") && count == 2) {
         wsprintfA(outgoing, "PONG\t%s", session);
         sendLine(outgoing);
@@ -1515,6 +1532,7 @@ int runBridge() {
     ULONGLONG interest = SPFEI(SPEI_END_INPUT_STREAM) | SPFEI(SPEI_TTS_BOOKMARK);
     if (FAILED(voice->SetInterest(interest, interest))) { logMessage("Cannot receive SAPI completion events."); return 2; }
     if (!openSerial(port)) { logMessage("Cannot open configured COM port. Check VM serial settings and other bridge instances."); return 3; }
+    publishLocalStatus(false);
     SetConsoleCtrlHandler(onConsoleEvent, TRUE);
     logMessage("Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits.");
 #ifdef ALVB_TEST_DROP_END_EVENTS
@@ -1537,6 +1555,7 @@ int runBridge() {
             stopSpeech(14); // serial transport fault
             closePlayback();
             session[0] = 0;
+            publishLocalStatus(false);
             audioRoute = ROUTE_XP;
             appliedRoute = -1;
             selectedQuality = -1;
@@ -1579,6 +1598,7 @@ int runBridge() {
             stopSpeech(15); // heartbeat expiration
             closePlayback();
             session[0] = 0;
+            publishLocalStatus(false);
             audioRoute = ROUTE_XP;
             appliedRoute = -1;
             selectedQuality = -1;
@@ -1586,6 +1606,7 @@ int runBridge() {
         }
     }
     stopSpeech();
+    publishLocalStatus(false);
     closePlayback();
     CloseHandle(serialPort);
     if (captureStream) captureStream->Release();

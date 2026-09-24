@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.2-dev4 — connection announcements and speech admission follow-up, release still on hold
+## 0.1.2-dev4 — XP status signal and speech admission follow-up, release still on hold
 
-- Add an NVDA setting, on by default, to announce bridge connection changes
-  while a local synthesizer is selected. Repeated disconnect reports are
-  suppressed until the bridge reconnects.
+- Publish connection state and a heartbeat tick locally in XP for an optional
+  XP NVDA companion. Speech announcements come from XP NVDA, not the host
+  bridge add-on. A stale heartbeat counts as disconnected.
 - Split unusually large NVDA speech requests into bounded bridge utterances
   without discarding words or bookmarks. Record item and character counts if
   an admission limit is still reached, without logging speech content.
@@ -12,6 +12,10 @@
   word “period” before the following text. Other sentence periods retain their
   existing timing. Verify the behavior directly with an XP SAPI voice and
   install the updated helper in XP.
+- Accept a measured two-millisecond terminal bookmark lead when XP sends
+  Eloquence audio to NVDA. A 97-byte lead at 48 kHz had exceeded the former
+  96-byte limit by one byte and caused a false disconnect. Larger missing
+  audio tails still fail.
 - Keep the public release on hold pending normal-use listening.
 
 ## 0.1.2-dev4 — XP SAPI input and routed-audio correction, release still on hold
