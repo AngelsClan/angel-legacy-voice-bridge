@@ -63,6 +63,7 @@ const unsigned int MAX_XML = 131072;
 WCHAR utteranceXml[MAX_XML];
 unsigned int xmlUsed = 0;
 bool styleOpen = false;
+bool visibleTextStarted = false;
 unsigned int styleRate = 10, styleVolume = 100, stylePitch = 10, styleSpell = 0;
 volatile LONG stopping = 0;
 DWORD lastContact = 0;
@@ -551,6 +552,7 @@ void stopSpeech(LONG reason = 1) {
     endInputSeen = false;
     xmlUsed = 0;
     styleOpen = false;
+    visibleTextStarted = false;
 }
 
 void sendError(const char* code) {
@@ -774,7 +776,20 @@ void makeSpeechXml(unsigned int pitch, unsigned int volume, bool spell) {
     wsprintfW(speechXml, L"<volume level=\"%u\"><pitch absmiddle=\"%d\">",
               volume, static_cast<int>(pitch) - 10);
     if (spell) lstrcatW(speechXml, L"<spell>");
+    bool textStarted = false;
     for (const WCHAR* next = speechText; *next; ++next) {
+        // Some XP voices speak a leading XML dot as the word "period".
+        // An isolated text node keeps the punctuation without changing
+        // the timing of periods later in the sentence.
+        if (!textStarted && *next == L'.') {
+            const WCHAR* after = next;
+            while (*after == L'.') ++after;
+            if (!*after || *after == L' ' || *after == L'\t' || *after == L'\r' || *after == L'\n') {
+                lstrcatW(speechXml, L"<![CDATA[.]]>");
+                continue;
+            }
+        }
+        if (*next != L' ' && *next != L'\t' && *next != L'\r' && *next != L'\n') textStarted = true;
         // Pipe Organ's XP SAPI engine accepts a raw '!' and then fails the
         // stream asynchronously. An isolated CDATA text node preserves the
         // mark and survived 100 direct SAPI requests without slowing speech.
@@ -914,6 +929,15 @@ bool appendSpeechPart(unsigned int rate, unsigned int volume, unsigned int pitch
         styleOpen = true;
     }
     for (const WCHAR* next = speechText; *next; ++next) {
+        if (!visibleTextStarted && *next == L'.') {
+            const WCHAR* after = next;
+            while (*after == L'.') ++after;
+            if (!*after || *after == L' ' || *after == L'\t' || *after == L'\r' || *after == L'\n') {
+                if (!appendXml(L"<![CDATA[.]]>")) return false;
+                continue;
+            }
+        }
+        if (*next != L' ' && *next != L'\t' && *next != L'\r' && *next != L'\n') visibleTextStarted = true;
         if (*next == L'!') { if (!appendXml(L"<![CDATA[!]]>")) return false; }
         else if (*next == L'&') { if (!appendXml(L"&amp;")) return false; }
         else if (*next == L'<') { if (!appendXml(L"&lt;")) return false; }
@@ -1195,6 +1219,7 @@ void batchCommand(char** fields, unsigned int count) {
         requestId = newRequest;
         xmlUsed = 0;
         styleOpen = false;
+        visibleTextStarted = false;
         utteranceXml[0] = 0;
         assembling = true;
     } else {

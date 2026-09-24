@@ -62,6 +62,8 @@ class BridgePanel(SettingsPanel):
         self.fallback.SetValue(values["fallback"])
         self.autoReturn = helper.addItem(wx.CheckBox(self, label="Automatically return to the bridge after &recovery"))
         self.autoReturn.SetValue(values["autoReturn"])
+        self.announceStatus = helper.addItem(wx.CheckBox(self, label="Announce bridge connection changes through &NVDA"))
+        self.announceStatus.SetValue(values["announceStatus"])
         self._autoReturn_value = values["autoReturn"]
         helper.addItem(wx.StaticText(self, label="Optional: after automatic eSpeak fallback, capture and discard a short check phrase from the previous voice; return only after a real bookmark and non-silent audio. This requires the updated XP helper. Checks back off and stop after 15 minutes. Manual synth or profile changes and Disconnect cancel the pending return."))
         self.diagnostics = helper.addItem(wx.CheckBox(self, label="Write text-free dia&gnostics log"))
@@ -201,6 +203,8 @@ class BridgePanel(SettingsPanel):
 
     def onDisable(self, event):
         service.disable()
+        if service.settings()["announceStatus"]:
+            ui.message("XP voice bridge disconnected")
         self.active.SetValue(False)
         self.enabled.SetValue(False)
         self.mirror.SetValue(False)
@@ -271,6 +275,7 @@ class BridgePanel(SettingsPanel):
                            ("mirrorVolume", self.volume.GetValue()), ("fallback", self.fallback.GetValue()),
                            ("autoReturn", self.autoReturn.GetValue()),
                            ("diagnostics", self.diagnostics.GetValue()),
+                           ("announceStatus", self.announceStatus.GetValue()),
                            ("fullXPVolume", self.fullXPVolume.GetValue()),
                            ("speechRoute", selected_route),
                            ("quality", QUALITY_VALUES[self.quality.GetSelection()])):

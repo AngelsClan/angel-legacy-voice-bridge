@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2-dev4 — connection announcements and speech admission follow-up, release still on hold
+
+- Add an NVDA setting, on by default, to announce bridge connection changes
+  while a local synthesizer is selected. Repeated disconnect reports are
+  suppressed until the bridge reconnects.
+- Split unusually large NVDA speech requests into bounded bridge utterances
+  without discarding words or bookmarks. Record item and character counts if
+  an admission limit is still reached, without logging speech content.
+- Preserve leading periods for XP voices without making SAPI XML speak the
+  word “period” before the following text. Other sentence periods retain their
+  existing timing. Verify the behavior directly with an XP SAPI voice and
+  install the updated helper in XP.
+- Keep the public release on hold pending normal-use listening.
+
 ## 0.1.2-dev4 — XP SAPI input and routed-audio correction, release still on hold
 
 - Preserve literal exclamation marks in generated SAPI XML using isolated CDATA

@@ -18,7 +18,7 @@ class Settings:
     def __init__(self):
         self.values = dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, speechRoute="xp", pipe=r"\\.\pipe\AngelLegacySpeech-test",
                            mirror=True, mirrorVoice="token", mirrorRate=50,
-                           mirrorVolume=100, fallback=True, diagnostics=True)
+                           mirrorVolume=100, fallback=True, diagnostics=True, announceStatus=True)
 
     def __getitem__(self, key):
         return self.values[key]
@@ -175,7 +175,7 @@ class AdapterTests(unittest.TestCase):
     def panel(self):
         panel = self.plugin.BridgePanel()
         for name, value in dict(active=True, quality=0, autoReturn=False, fullXPVolume=False, enabled=True, pipe=self.settings["pipe"], mirror=False,
-                                rate=60, volume=70, fallback=True, diagnostics=True, voice=0).items():
+                                rate=60, volume=70, fallback=True, diagnostics=True, announceStatus=True, voice=0).items():
             setattr(panel, name, Control(value))
         panel.voice_tokens = ["token"]
         panel.onRefresh = Mock()
@@ -347,6 +347,16 @@ class AdapterTests(unittest.TestCase):
         synth._event("disconnected", "Test failure")
         self.handler.setSynth.assert_called_once_with("espeak")
         self.cancel_speech.assert_called_once()
+
+    def test_long_speech_is_batched_without_espeak_fallback(self):
+        from _alvb.protocol import Speech
+        synth = self.synth.SynthDriver()
+        self.synth.translate = Mock(return_value=[Speech("word " * 6000)])
+        synth.speak(["long request"])
+        self.assertGreater(self.client.enqueue.call_count, 1)
+        self.assertTrue(all(sum(len(item.text) for item in call.args[0] if isinstance(item, Speech)) <= 16000
+                            for call in self.client.enqueue.call_args_list))
+        self.handler.setSynth.assert_not_called()
 
     def test_fallback_clears_abandoned_indexes_before_changing_synth(self):
         synth = self.synth.SynthDriver()

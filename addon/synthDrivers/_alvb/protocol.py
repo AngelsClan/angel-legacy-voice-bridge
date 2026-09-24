@@ -1,7 +1,7 @@
 """Bounded serial frames; version 2 assembles one utterance before speaking."""
 import base64
 import binascii
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 MAX_LINE = 8191
 CHUNK_CHARACTERS = 120
@@ -28,6 +28,40 @@ class Bookmark:
 @dataclass(frozen=True)
 class Silence:
     seconds: float
+
+
+def bounded_utterances(items, max_items=200, max_characters=8000):
+    """Preserve every item while dividing a large NVDA request for XP.
+
+    The transport accepts at most 256 items and 16,000 characters per
+    utterance. Keep well inside both limits so a large say-all item cannot
+    turn into an admission error and an unnecessary synth fallback.
+    """
+    batch = []
+    characters = 0
+    for item in items:
+        if isinstance(item, Speech) and item.text:
+            remaining = item.text
+            while remaining:
+                if len(batch) >= max_items or characters >= max_characters:
+                    yield tuple(batch)
+                    batch, characters = [], 0
+                allowance = max_characters - characters
+                count = min(len(remaining), allowance)
+                if count < len(remaining):
+                    boundary = remaining.rfind(" ", 0, count)
+                    if boundary >= count // 2:
+                        count = boundary + 1
+                batch.append(replace(item, text=remaining[:count]))
+                characters += count
+                remaining = remaining[count:]
+        else:
+            if len(batch) >= max_items:
+                yield tuple(batch)
+                batch, characters = [], 0
+            batch.append(item)
+    if batch:
+        yield tuple(batch)
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ from synthDriverHandler import VoiceInfo, synthIndexReached, synthDoneSpeaking
 from ._alvb import service
 from ._alvb.formats import OUTPUT_FORMATS
 from ._alvb.sequence import SUPPORTED_COMMANDS, translate
+from ._alvb.protocol import bounded_utterances
 
 
 class SynthDriver(synthDriverHandler.SynthDriver):
@@ -112,8 +113,10 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         try:
             index = next(index for index, token in self.client.voice_tokens.items() if token == self._voice)
             items = translate(speechSequence, index, self._rate, self._volume, self._pitch)
-            if not self.client.enqueue(items):
-                self._lost_connection()
+            for batch in bounded_utterances(items):
+                if not self.client.enqueue(batch):
+                    self._lost_connection()
+                    break
         except Exception as error:
             # Exception text may contain the utterance; record its type only.
             service.diagnostics().warning("Speech admission failed: error_type=%s", type(error).__name__)

@@ -3,10 +3,26 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "addon/synthDrivers"))
-from _alvb.protocol import Bookmark, Silence, LineReader, Speech, chunks, speech_frame, utterance_frames
+from _alvb.protocol import Bookmark, Silence, LineReader, Speech, bounded_utterances, chunks, speech_frame, utterance_frames
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_large_nvda_request_keeps_all_text_and_bookmarks(self):
+        source = [Bookmark(1), Speech("word " * 6000, voice=3), Bookmark(2)]
+        batches = list(bounded_utterances(source))
+        self.assertGreater(len(batches), 1)
+        self.assertEqual(
+            "".join(item.text for batch in batches for item in batch if isinstance(item, Speech)),
+            source[1].text,
+        )
+        self.assertEqual(
+            [item.index for batch in batches for item in batch if isinstance(item, Bookmark)],
+            [1, 2],
+        )
+        self.assertTrue(all(len(batch) <= 256 for batch in batches))
+        self.assertTrue(all(sum(len(item.text) for item in batch if isinstance(item, Speech)) <= 16000
+                            for batch in batches))
+
     def test_packets_form_one_utterance_without_losing_text(self):
         text = "Some words, including an emoji \U0001f600. " * 30
         frames = utterance_frames("a" * 32, 1, 2, [Speech(text), Bookmark(6), Silence(.2)], 44100)

@@ -196,6 +196,7 @@ class BridgeClient:
         items = tuple(items)
         characters = sum(len(item.text) for item in items if isinstance(item, Speech))
         if len(items) > 256 or characters > 16000:
+            self.log.warning("Speech admission limit: items=%d characters=%d", len(items), characters)
             raise ValueError("Utterance limit exceeded")
         with self._lock:
             if not self.connected or self._stop.is_set():
@@ -206,6 +207,7 @@ class BridgeClient:
                 return False
             if len(self._queue) >= 64:
                 if not drop_oldest:
+                    self.log.warning("Speech admission queue full: queued=%d", len(self._queue))
                     raise ValueError("Speech queue limit exceeded")
                 self._queue.popleft()
                 self._dropped_utterances += 1

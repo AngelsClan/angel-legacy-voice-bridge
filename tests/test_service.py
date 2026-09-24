@@ -22,7 +22,7 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(self.values["active"])
 
     def setUp(self):
-        self.values = dict(active=True, enabled=True, mirror=True, autoReturn=True, fullXPVolume=False, pipe=DEFAULT_PIPE, quality=0)
+        self.values = dict(active=True, enabled=True, mirror=True, autoReturn=True, fullXPVolume=False, pipe=DEFAULT_PIPE, quality=0, announceStatus=True)
         self.handler = types.SimpleNamespace(getSynth=Mock(return_value=types.SimpleNamespace(name="ibmeci")), setSynth=Mock(),
             changeVoice=lambda synth, voice: setattr(synth, "voice", voice))
         self.pending = []
@@ -47,6 +47,24 @@ class ServiceTests(unittest.TestCase):
         # A module-local clock: recovery timing is tested without sleeping.
         self.now = 1000.0
         self.service.time = types.SimpleNamespace(monotonic=lambda: self.now)
+
+    def test_background_connection_announcements_can_be_disabled(self):
+        source = types.SimpleNamespace(connected=True, generation=1)
+        self.service.client = source
+        self.service.try_recovery = Mock()
+        self.service._deliver(source, "connected", None)
+        self.ui.message.assert_called_once_with("XP voice bridge connected")
+        self.service.recovery_event = Mock()
+        source.connected = False
+        self.service._deliver(source, "disconnected", "test")
+        self.service._deliver(source, "disconnected", "test")
+        self.ui.message.assert_any_call("XP voice bridge disconnected")
+        self.assertEqual(self.ui.message.call_count, 2)
+        self.values["announceStatus"] = False
+        self.ui.message.reset_mock()
+        source.connected = True
+        self.service._deliver(source, "connected", None)
+        self.ui.message.assert_not_called()
 
     def test_diagnostic_construction_failure_uses_disabled_sink(self):
         state = types.SimpleNamespace(WritePaths=types.SimpleNamespace(configDir="unused"))
