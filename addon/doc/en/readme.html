@@ -3,6 +3,8 @@
 <body>
 <h1>Angel Legacy Voice Bridge</h1>
 
+<p><strong>Getting the files:</strong> there is no public installer release yet. This repository contains development source. Build the matching XP helper and NVDA add-on from the same revision, or use a matching pair supplied for testing. Do not combine files from different builds solely because they share a version number.</p>
+
 <p><strong>Which add-on?</strong> This bridge speaks through SAPI 5 voices installed inside Windows XP. The separate Lion Voices, Snow Leopard Voices, Leopard Voices and Tiger Voices add-ons run their MacinTalk engines directly on the Windows computer with NVDA, without XP or this bridge. Angel Audio Keeper is separate again: it keeps sound outputs active but makes no speech. You can install these projects together when you need them.</p>
 
 <p>Use old SAPI 5 voices that only run on 32-bit Windows XP as if they were installed in your modern NVDA. You keep a Windows XP virtual machine on your own computer with your licensed voices inside it. This add-on sends NVDA's text into that virtual machine. You can play bridge speech through XP, NVDA's selected output device, or both.</p>
@@ -31,8 +33,8 @@
 <p>The pipe name above is a generic default, not tied to one computer. You may choose another name as long as it begins with <code>\\.\pipe\AngelLegacySpeech-</code>, which is useful when you run more than one XP machine; type exactly the same name into the add-on. Only one program at a time can use a pipe.</p>
 
 <h3>Step 2: put the helper in XP and run it</h3>
-<p>Copy AngelLegacyVoiceBridge.exe from the release's XP Bridge folder into XP, for example into <code>C:\AngelLegacyVoiceBridge</code>. Guest Additions or an attached ISO are both convenient ways to copy it; neither is part of the speech connection, and you should not turn XP's networking on just to transfer a file.</p>
-<p>Run it, for example with Windows+R and its full path. A console window opens and prints "Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits." Leave it open and Alt+Tab away, or minimize it; Control+C closes it. When NVDA connects it reports the active route.</p>
+<p>Copy AngelLegacyVoiceBridge.exe from the matching build's XP Bridge folder into XP, for example into <code>C:\AngelLegacyVoiceBridge</code>. Guest Additions or an attached ISO are both convenient ways to copy it; neither is part of the speech connection, and you should not turn XP's networking on just to transfer a file.</p>
+<p>Run it, for example with Windows+R and its full path. A console window opens and prints "Angel Legacy Voice Bridge 0.1.2-dev4. Waiting for the host. Ctrl+C exits." Leave it open and Alt+Tab away, or minimize it; Control+C closes it. When NVDA connects it reports the active route.</p>
 <p>There is no driver to install, no service and no reboot. COM1 is the default; <code>--com2</code>, <code>--com3</code> and <code>--com4</code> are the only other arguments it accepts. Starting a second copy fails, because the first already owns the port. If it says "Cannot open configured COM port. Check VM serial settings and other bridge instances.", the port is missing or something else has it.</p>
 <p>To start it after XP logs on, put a shortcut to the EXE in that XP user's Start Menu, Programs, Startup folder. Nothing creates that shortcut for you. The helper needs a logged-in user with a working audio session, which is exactly why it is an ordinary console program and not a Windows service.</p>
 

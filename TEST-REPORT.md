@@ -1,5 +1,21 @@
 # Beta qualification
 
+## Read this first
+
+**Status: development build, public release on hold.** The newest results are
+first below; older sections describe earlier builds and should not be read as
+the current installation instructions. The [setup guide](docs/ADVANCED-GUIDE.md)
+has those instructions.
+
+| What was checked | What the result means |
+| --- | --- |
+| XP helper with installed SAPI 5 voices | All 29 voices completed a default-quality switch and bookmark request in the latest XP test. The specific Pipe Organ leading-exclamation failure passed repeated direct and bridge requests after the input correction. |
+| NVDA add-on and routed audio | Automated tests and an isolated NVDA session exercised completion, cancellation and the end of segmented speech. Captured audio was counted, not judged by listening. |
+| Normal use over days or weeks | Not established. The earlier NVDA freeze is not conclusively explained, and crackle-free listening has not been qualified. |
+
+These are test boundaries, not a claim that every voice and VM will behave the
+same way. Keep a working local NVDA synthesizer while evaluating this build.
+
 ## 0.1.2-dev4 XP SAPI input revision — 2026-09-23
 
 The XP helper's Pipe Organ voice failed asynchronously with SAPI `E_FAIL` on

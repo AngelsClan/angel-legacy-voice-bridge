@@ -1,5 +1,10 @@
 # Public-release boundary
 
+This checklist is for maintainers preparing a release. Users looking for
+installation steps should start with the [README](README.md). The current
+development build has no public installer release; this checklist does not
+announce one.
+
 Publication is an explicit operator action, never performed by the add-on or
 build script. The first public release is version 0.1.0, marked as a beta
 pre-release under AngelsClan, licensed GPL version 2 or later.

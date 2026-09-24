@@ -1,4 +1,9 @@
-# Angel Legacy Voice Bridge
+# Angel Legacy Voice Bridge: setup and use
+
+This is the detailed guide. For a short overview and first-use checklist,
+start with the [README](../README.md). The sections below explain each setting
+and what to check if a step fails. No command-line work is required for normal
+use if you can set the serial port in VirtualBox Manager.
 
 Use old SAPI 5 voices that only work on 32-bit Windows XP as if they were
 installed in your modern NVDA.
@@ -125,7 +130,13 @@ been separately qualified.
 You install two things in two different places, plus one virtual hardware
 change. Take them in order; each step ends with something you can check.
 
-The release page provides:
+When a public release becomes available, its matching files will be listed
+on the release page. **There is no public installer release yet.** For this
+development source, [build both files from source](#building-from-source) or
+use a matching development pair supplied for testing. Do not mix files from
+different builds merely because their version numbers match.
+
+The files you need are:
 
 | File | Where it goes |
 | --- | --- |
@@ -179,7 +190,8 @@ To confirm it afterwards:
 ```
 
 You should see UART 1 enabled at I/O base `0x03f8`, IRQ 4, in server mode on
-your pipe path.
+your pipe path. If it is missing, return to VirtualBox Manager while XP is
+powered off and check Port 1 again before continuing.
 
 **About the pipe name.** `\\.\pipe\AngelLegacySpeech-XP` is a generic default,
 not tied to any particular computer. You may choose a different name as long as
@@ -215,6 +227,9 @@ sounds still play.
    Leave it open and Alt+Tab away, or minimize it. Control+C closes it. Later,
    when NVDA connects, it also prints `Bridge connected. Audio plays through
    the XP default output.`
+
+If the console says it is waiting for the host, you can continue to the NVDA
+steps. It is expected to wait until the add-on connects.
 
 That is all XP needs. There is no driver to install, no service, and no reboot.
 COM1 is the default; if you deliberately configured a different port, start the
@@ -275,8 +290,9 @@ With XP running and its helper console open:
    or **Both XP and NVDA** and test again. An older helper keeps audio on XP
    and reports that the requested route is unsupported.
 
-If you hear it, the bridge works. If the status says connected but you hear
-nothing, go to [Troubleshooting](#troubleshooting) and check the chosen output.
+If you hear it, the selected voice works through that audio route. A connected
+status alone only confirms communication, so if you hear nothing, go to
+[Troubleshooting](#troubleshooting) and check the chosen output.
 
 ### Step 5: Choose how you want to use the voices
 
@@ -372,7 +388,7 @@ These are in NVDA menu > Preferences > Settings > **Legacy Voice Bridge**.
 | Local bridge pipe | The exact pipe name your VM creates. No IP address and no guest password are involved. Switch to a local synthesizer before you change this. |
 | Detect running VM pipes | Lists the matching pipes that exist right now, so you can pick one. It does not start, change or inspect a virtual machine. It can only find a pipe that is already configured. |
 | Mirror local NVDA speech to XP | Sends your speech to XP as well as to your normal synthesizer. Turning it off cancels mirrored speech immediately. The two voices can overlap and drift apart in timing. Off by default. |
-| Where XP speech plays | XP speakers (default), Send to NVDA, or Both. Applies to bridge speech and the Test button. NVDA and Both require the matching updated XP helper. Other XP sounds remain on XP's sound card. |
+| Where XP bridge speech plays | XP speakers (default), Send to NVDA, or Both. Applies to bridge speech and the Test button. NVDA and Both require the matching updated XP helper. Other XP sounds remain on XP's sound card. |
 | Mirror/test voice | Which XP voice mirroring and the Test button use. It is saved by the voice's SAPI token ID, so it survives changes in list order. |
 | Mirror/test rate (0–100) | 50 by default, which is SAPI's normal speed. Engines interpret speed differently. |
 | Mirror/test volume (0–100) | 100 by default. Independent of the Windows and VM mixers. Zero silences most voices but not all of them (see above). |
@@ -491,7 +507,7 @@ Voice Bridge settings, confirm the test speech, and then select the
 synthesizer.
 
 **It says connected, but I hear nothing.**
-First check **Where XP speech plays**. On XP speakers, check XP's default
+First check **Where XP bridge speech plays**. On XP speakers, check XP's default
 playback device, volume and VM audio output. On Send to NVDA, check NVDA's
 selected output device and the connection status for an unsupported route.
 Both routes need a SAPI 5 voice that renders inside XP; try another voice.
@@ -510,11 +526,13 @@ the synthesizer settings ring as you switch voices. Also check your bridge
 volume: a low volume such as 20 costs real detail.
 
 **Speech is slow, or it gets stuck.**
-Select a local synthesizer, stop any test speech, close the helper in XP with
-Control+C, start it again and press Connect. Virtual machine CPU load, the VM's
-audio driver and slow legacy engines all affect responsiveness. Never turn XP's
-networking on as a workaround, and never run the developer integration tests
-while the bridge is your only speech.
+First press NVDA+Shift+F11 to disable the bridge and restore local speech. If
+NVDA is still responsive, check whether the XP helper is running and whether
+XP itself can speak with the selected voice. To retry, close only the helper
+in XP with Control+C, start it again, and press Connect in NVDA's bridge
+settings. Virtual machine CPU load, its audio driver and slow legacy engines
+all affect responsiveness. Never turn XP's networking on as a workaround, and
+never run the developer integration tests while the bridge is your only speech.
 
 **NVDA froze.**
 Use your emergency speech, keep the diagnostics log, and please
@@ -703,7 +721,7 @@ anything is published.
 
 Copyright 2026 Angels Clan. This project's original code is licensed under the
 GNU General Public License, version 2 or, at your option, any later version.
-See [LICENSE](LICENSE). NVDA, VirtualBox, VMware and the voice engines all have
+See [LICENSE](../LICENSE). NVDA, VirtualBox, VMware and the voice engines all have
 their own licenses, and no voice data is redistributed here.
 
 - [VirtualBox serial ports](https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/serialports.html)

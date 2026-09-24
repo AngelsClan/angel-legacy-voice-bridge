@@ -1,5 +1,9 @@
 # Local serial protocol, version 2
 
+This is a developer reference for the connection between the NVDA add-on and
+the XP helper. For installation and ordinary use, see the [README](README.md)
+and [setup guide](docs/ADVANCED-GUIDE.md).
+
 This is an unencrypted, local-only text protocol. The hypervisor creates a
 Windows named pipe; the host opens it; XP reads/writes COM1 (or an explicitly
 selected COM2–4). No network listening socket, remote code execution command,
