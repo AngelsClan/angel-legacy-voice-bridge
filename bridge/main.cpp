@@ -1116,6 +1116,64 @@ HRESULT applyOutput(unsigned int slot, unsigned int sampleRate) {
     return result;
 }
 
+bool containsAsciiName(const WCHAR* text, const WCHAR* name) {
+    if (!text || !name) return false;
+    unsigned int length = lstrlenW(text);
+    unsigned int wanted = lstrlenW(name);
+    for (unsigned int start = 0; start + wanted <= length; ++start) {
+        unsigned int matched = 0;
+        while (matched < wanted) {
+            WCHAR left = text[start + matched];
+            WCHAR right = name[matched];
+            if (left >= L'A' && left <= L'Z') left += L'a' - L'A';
+            if (right >= L'A' && right <= L'Z') right += L'a' - L'A';
+            if (left != right) break;
+            ++matched;
+        }
+        if (matched == wanted) return true;
+    }
+    return false;
+}
+
+void warmMacEnginesBeforeOpenEvv() {
+    // XP sometimes refuses the first load of a Panthera SAPI DLL after the
+    // OpenEVV engine has loaded (ERROR_DLL_INIT_FAILED). One silent request per
+    // registered engine class loads each DLL first. The output is memory only.
+    bool openEvvPresent = false;
+    for (unsigned int i = 0; i < voiceCount; ++i) {
+        if (voices[i] && containsAsciiName(voiceIds[i], L"OpenEVV")) {
+            openEvvPresent = true;
+            break;
+        }
+    }
+    if (!openEvvPresent) return;
+    WCHAR* warmed[MAX_VOICES] = {};
+    unsigned int count = 0;
+    for (unsigned int i = 0; i < voiceCount; ++i) {
+        if (!voices[i] || !containsAsciiName(voiceIds[i], L"Panthera")) continue;
+        WCHAR* clsid = NULL;
+        if (FAILED(voices[i]->GetStringValue(L"CLSID", &clsid)) || !clsid) continue;
+        bool repeated = false;
+        for (unsigned int j = 0; j < count; ++j) {
+            if (!lstrcmpiW(clsid, warmed[j])) { repeated = true; break; }
+        }
+        if (repeated) { CoTaskMemFree(clsid); continue; }
+        HRESULT result = selectVoice(i);
+        if (SUCCEEDED(result)) result = bindCaptureOutput(i, AUDIO_FALLBACK_RATE);
+        if (SUCCEEDED(result)) result = voice->Speak(L" ", 0, NULL);
+        if (SUCCEEDED(result)) warmed[count++] = clsid;
+        else {
+            CoTaskMemFree(clsid);
+            logMessage("A local SAPI engine could not be initialized before OpenEVV; voice switching may fail.");
+        }
+    }
+    for (unsigned int i = 0; i < count; ++i) CoTaskMemFree(warmed[i]);
+    selectedVoice = -1;
+    selectedQuality = -1;
+    appliedRoute = -1;
+    captureRewind();
+}
+
 // Announce the format that was named when the stream was bound.
 //
 // This must NOT ask the capture stream, and neither must anything else on this
@@ -1556,6 +1614,7 @@ int runBridge() {
     if (!voiceCount) logMessage("No SAPI 5 voices registered yet; waiting for voice installation and idle scan.");
     ULONGLONG interest = SPFEI(SPEI_END_INPUT_STREAM) | SPFEI(SPEI_TTS_BOOKMARK);
     if (FAILED(voice->SetInterest(interest, interest))) { logMessage("Cannot receive SAPI completion events."); return 2; }
+    warmMacEnginesBeforeOpenEvv();
     if (!openSerial(port)) { logMessage("Cannot open configured COM port. Check VM serial settings and other bridge instances."); return 3; }
     loadLocalSpeechErrorSerial();
     publishLocalStatus(false);

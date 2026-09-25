@@ -2,6 +2,11 @@
 
 ## 0.1.2-dev4 — XP status signal and speech admission follow-up, release still on hold
 
+- On XP systems with both OpenEVV and Panthera SAPI voices, initialize each
+  Panthera engine class into a memory-only audio stream at helper startup.
+  This prevents a first switch from OpenEVV to an unused Panthera engine from
+  failing with Windows DLL initialization error `0x8007045A`. No audible
+  startup speech or voice preference change is intended.
 - Publish connection state and a heartbeat tick locally in XP for an optional
   XP NVDA companion. Speech announcements come from XP NVDA, not the host
   bridge add-on. A stale heartbeat counts as disconnected. Publish a local

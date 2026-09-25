@@ -9,12 +9,17 @@ has those instructions.
 
 | What was checked | What the result means |
 | --- | --- |
-| XP helper with installed SAPI 5 voices | All 29 voices completed a default-quality switch and bookmark request in the latest XP test. The specific Pipe Organ leading-exclamation failure passed repeated direct and bridge requests after the input correction. |
+| XP helper with installed SAPI 5 voices | The latest real host-to-XP serial probe completed 37/37 installed voices at 48 kHz and 74/74 forward/reverse voice transitions at voice-default quality. This included an OpenEVV-to-Panthera switch that had failed with DLL initialization error `0x8007045A` before the helper change. The earlier Pipe Organ leading-exclamation test also passed. |
 | NVDA add-on and routed audio | Automated tests and an isolated NVDA session exercised completion, cancellation and the end of segmented speech. Captured audio was counted, not judged by listening. |
 | Normal use over days or weeks | Not established. The earlier NVDA freeze is not conclusively explained, and crackle-free listening has not been qualified. |
 
 These are test boundaries, not a claim that every voice and VM will behave the
 same way. Keep a working local NVDA synthesizer while evaluating this build.
+
+The bridge Python suite passed 180 tests on the final run. An earlier run had
+one queue-length timing failure (63 instead of 64) while its background worker
+was active; no bridge client code changed in this XP helper update. Long-use
+voice switching still needs owner listening and endurance testing.
 
 ## 0.1.2-dev4 XP SAPI input revision — 2026-09-23
 
