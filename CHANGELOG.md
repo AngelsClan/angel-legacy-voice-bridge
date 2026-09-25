@@ -2,6 +2,13 @@
 
 ## 0.1.2-dev4 — XP status signal and speech admission follow-up, release still on hold
 
+- After a saved-state resume, a running VirtualBox VM can leave its host serial
+  pipe connected but unable to carry the XP helper handshake. After a no-reply
+  timeout, the host worker now checks for one running VM whose serial server
+  pipe exactly matches the configured bridge pipe, reopens only that virtual
+  serial connection, and begins a new bridge session. Repairs are rate-limited
+  and do not reboot XP or restart its programs. An explicit synthesizer
+  selection allows one bounded extra wait for this recovery.
 - On XP systems with both OpenEVV and Panthera SAPI voices, initialize each
   Panthera engine class into a memory-only audio stream at helper startup.
   This prevents a first switch from OpenEVV to an unused Panthera engine from

@@ -16,6 +16,14 @@ has those instructions.
 These are test boundaries, not a claim that every voice and VM will behave the
 same way. Keep a working local NVDA synthesizer while evaluating this build.
 
+A saved XP state resumed after a Windows host restart with a visible named pipe
+but no voice catalog. A direct handshake failed even when NVDA was stopped;
+reopening the running VM's serial server pipe restored a 37-voice handshake
+without rebooting XP. The new host worker performs that exact-pipe repair
+after a no-reply timeout, then starts a fresh protocol session. This path is
+covered by exact-match and unrelated-VM tests. Recovery during ordinary user
+speech after a future host restart still needs a live confirmation.
+
 The bridge Python suite passed 180 tests on the final run. An earlier run had
 one queue-length timing failure (63 instead of 64) while its background worker
 was active; no bridge client code changed in this XP helper update. Long-use

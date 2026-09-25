@@ -91,6 +91,7 @@ class BridgeClient:
         self._stop = threading.Event()
         self.closed_event = threading.Event()
         self._wait_for = wait_for
+        self._last_serial_repair = 0
         self._queue = deque()
         self._commands = deque()
         self._active = None
@@ -737,6 +738,7 @@ class BridgeClient:
                 break  # A stuck predecessor degrades to normal pipe-busy retry.
         while not self._stop.is_set():
             transport = None
+            repair_needed = False
             try:
                 transport = self.transport_factory(self.pipe_name)
                 self.status = "Connecting to XP helper"
@@ -745,11 +747,20 @@ class BridgeClient:
                 # Error messages contain state/errors only, never speech payloads.
                 reason = str(error) if isinstance(error, (OSError, ValueError)) else "Unexpected bridge failure"
                 self._disconnect(reason)
+                repair_needed = (isinstance(error, TimeoutError)
+                                 and reason == "No reply from XP helper")
             finally:
                 if transport is not None:
                     try:
                         transport.close()
                     except OSError:
                         self.log.warning("Bridge transport close failed")
+            if repair_needed and not self._stop.is_set():
+                now = time.monotonic()
+                if now - self._last_serial_repair >= 60:
+                    self._last_serial_repair = now
+                    from .serial_recovery import repair
+                    if repair(self.pipe_name):
+                        self.log.warning("Reopened matching VirtualBox serial pipe after XP stopped replying")
             self._stop.wait(1)
         self._disconnect("Stopped")

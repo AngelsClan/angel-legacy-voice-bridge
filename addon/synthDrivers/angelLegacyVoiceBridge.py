@@ -48,6 +48,14 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             if not previous_active:
                 service.stop()
             raise
+        if not self.client.connected:
+            # A restored VM can leave VirtualBox's serial server pipe attached
+            # but unable to pass bytes. The worker repairs the exact matching
+            # pipe after its first no-reply timeout, then opens a new session.
+            # Allow that one bounded repair during an explicit synth selection.
+            from ._alvb.serial_recovery import matching_serial
+            if matching_serial(service.settings()["pipe"]):
+                self.client.wait_connected(7)
         if not self.client.connected or not self.client.voices:
             settings = service.settings()
             if not previous_active or (not settings["enabled"] and not settings["mirror"]):

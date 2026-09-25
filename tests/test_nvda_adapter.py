@@ -156,6 +156,9 @@ class AdapterTests(unittest.TestCase):
             "queueHandler": module("queueHandler", eventQueue=object(), queueFunction=lambda queue, fn, *args: fn(*args)),
             "synthDrivers": package, "synthDrivers._alvb": shared,
             "synthDrivers._alvb.service": self.service,
+            "synthDrivers._alvb.serial_recovery": module(
+                "synthDrivers._alvb.serial_recovery",
+                matching_serial=Mock(return_value=None)),
             "synthDrivers._alvb.protocol": protocol,
             "synthDrivers._alvb.formats": formats,
             "synthDrivers._alvb.sequence": sequence,

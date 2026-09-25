@@ -28,6 +28,13 @@ The project does not supply XP, voices, or voice licenses. XP does not need an
 internet connection; the two programs talk through a local virtual serial
 connection.
 
+If VirtualBox's host serial pipe stops passing data after resuming a saved VM,
+the add-on can reopen that pipe automatically for a running VM whose configured
+serial pipe exactly matches the bridge setting. It then negotiates a new
+session with the XP helper; it does not reboot XP. This optional recovery uses
+VBoxManage when VirtualBox is installed on the same PC. Other VM software
+continues to use the ordinary reconnect loop.
+
 You will change one VirtualBox setting while XP is shut down, then start one
 program inside XP and install one add-on on your current PC. Nothing sets up
 the VM, installs voices, or changes NVDA's synthesizer automatically.
