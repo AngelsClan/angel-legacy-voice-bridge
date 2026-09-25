@@ -23,11 +23,14 @@ VM = "c7fa8dfc-2661-4e37-b7b8-2508ad12edae"
 
 
 class Runner:
-    def __init__(self, pipe=PIPE, state="running", attach_code=0):
+    def __init__(self, pipe=PIPE, state="running", attach_code=0,
+                 info_code=0, detach_code=0):
         self.calls = []
         self.pipe = pipe
         self.state = state
         self.attach_code = attach_code
+        self.info_code = info_code
+        self.detach_code = detach_code
 
     def __call__(self, command, **kwargs):
         self.calls.append(command)
@@ -37,10 +40,12 @@ class Runner:
             details = (f'VMState="{self.state}"\n'
                        'uartmode2="server,\\\\.\\pipe\\unrelated"\n'
                        f'uartmode1="server,{self.pipe}"\n')
-            return subprocess.CompletedProcess(command, 0, details)
+            return subprocess.CompletedProcess(command, self.info_code, details)
         if command[1] == "controlvm":
             return subprocess.CompletedProcess(
-                command, self.attach_code if command[-2] == "server" else 0, "")
+                command,
+                self.attach_code if command[-2] == "server" else self.detach_code,
+                "")
         raise AssertionError(command)
 
 
@@ -112,6 +117,16 @@ class SerialRecoveryTests(unittest.TestCase):
         runner = Runner(attach_code=1)
         self.assertFalse(module.repair(PIPE, runner, "VBoxManage.exe"))
         self.assertEqual(len(runner.calls), 4)
+
+    def test_vm_access_denied_does_not_detach_anything(self):
+        runner = Runner(info_code=1)
+        self.assertFalse(module.repair(PIPE, runner, "VBoxManage.exe"))
+        self.assertEqual(len(runner.calls), 2)
+
+    def test_failed_detach_does_not_attempt_attach(self):
+        runner = Runner(detach_code=1)
+        self.assertFalse(module.repair(PIPE, runner, "VBoxManage.exe"))
+        self.assertEqual(len(runner.calls), 3)
 
 
 if __name__ == "__main__":
