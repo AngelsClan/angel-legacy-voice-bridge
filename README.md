@@ -106,6 +106,8 @@ when the bridge remains disconnected. Those messages play through the
 synthesizer selected **inside XP**. They do not run through this host add-on.
 The XP helper also exposes a local counter when its SAPI engine fails, so the
 companion can announce that error after XP NVDA finishes speaking.
+In this development build, the XP helper and XP NVDA must run under the same
+Windows account to share this local status.
 
 ## More information
 
