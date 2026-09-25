@@ -67,6 +67,19 @@ bool visibleTextStarted = false;
 unsigned int styleRate = 10, styleVolume = 100, stylePitch = 10, styleSpell = 0;
 volatile LONG stopping = 0;
 DWORD lastContact = 0;
+DWORD localSpeechErrorSerial = 0;
+
+void loadLocalSpeechErrorSerial() {
+    HKEY key = NULL;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\AngelLegacyVoiceBridge", 0,
+                      KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return;
+    DWORD type = 0, bytes = sizeof(localSpeechErrorSerial);
+    if (RegQueryValueExW(key, L"SpeechErrorSerial", NULL, &type,
+                         reinterpret_cast<BYTE*>(&localSpeechErrorSerial),
+                         &bytes) != ERROR_SUCCESS || type != REG_DWORD ||
+                         bytes != sizeof(localSpeechErrorSerial)) localSpeechErrorSerial = 0;
+    RegCloseKey(key);
+}
 
 // Local XP NVDA can read this heartbeat without owning the virtual COM port.
 // It contains only connection state and a tick count, never speech or IDs.
@@ -80,6 +93,17 @@ void publishLocalStatus(bool connected) {
                    reinterpret_cast<const BYTE*>(&state), sizeof(state));
     RegSetValueExW(key, L"LastContactTick", 0, REG_DWORD,
                    reinterpret_cast<const BYTE*>(&tick), sizeof(tick));
+    RegCloseKey(key);
+}
+
+void publishLocalSpeechError() {
+    HKEY key = NULL;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\AngelLegacyVoiceBridge", 0, NULL,
+                        0, KEY_SET_VALUE, NULL, &key, NULL) != ERROR_SUCCESS) return;
+    ++localSpeechErrorSerial;
+    RegSetValueExW(key, L"SpeechErrorSerial", 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&localSpeechErrorSerial),
+                   sizeof(localSpeechErrorSerial));
     RegCloseKey(key);
 }
 char incoming[MAX_LINE];
@@ -581,6 +605,7 @@ void sendError(const char* code) {
 void reportSapiFailure(unsigned int stage, HRESULT result, unsigned int slot, unsigned int quality,
                        const SPVOICESTATUS* status = NULL, LONG abortBefore = -1,
                        LONG sinkAbortsBefore = -1, LONG abortReasonBefore = -1) {
+    publishLocalSpeechError();
     SYSTEMTIME now;
     GetLocalTime(&now);
     char record[256];
@@ -1532,6 +1557,7 @@ int runBridge() {
     ULONGLONG interest = SPFEI(SPEI_END_INPUT_STREAM) | SPFEI(SPEI_TTS_BOOKMARK);
     if (FAILED(voice->SetInterest(interest, interest))) { logMessage("Cannot receive SAPI completion events."); return 2; }
     if (!openSerial(port)) { logMessage("Cannot open configured COM port. Check VM serial settings and other bridge instances."); return 3; }
+    loadLocalSpeechErrorSerial();
     publishLocalStatus(false);
     SetConsoleCtrlHandler(onConsoleEvent, TRUE);
     logMessage("Angel Legacy Voice Bridge 0.1.2-dev3. Waiting for the host. Ctrl+C exits.");

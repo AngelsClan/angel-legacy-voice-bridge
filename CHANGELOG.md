@@ -4,7 +4,9 @@
 
 - Publish connection state and a heartbeat tick locally in XP for an optional
   XP NVDA companion. Speech announcements come from XP NVDA, not the host
-  bridge add-on. A stale heartbeat counts as disconnected.
+  bridge add-on. A stale heartbeat counts as disconnected. Publish a local
+  counter on SAPI speech failures so XP NVDA can announce those after it is
+  idle, without putting speech text in the status.
 - Split unusually large NVDA speech requests into bounded bridge utterances
   without discarding words or bookmarks. Record item and character counts if
   an admission limit is still reached, without logging speech content.

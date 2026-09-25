@@ -104,6 +104,8 @@ never needs your XP network connection or server credentials.
 An optional XP NVDA companion can announce connection changes and remind you
 when the bridge remains disconnected. Those messages play through the
 synthesizer selected **inside XP**. They do not run through this host add-on.
+The XP helper also exposes a local counter when its SAPI engine fails, so the
+companion can announce that error after XP NVDA finishes speaking.
 
 ## More information
 
