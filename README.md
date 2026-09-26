@@ -13,6 +13,11 @@ repository contains the source; the [build instructions](docs/ADVANCED-GUIDE.md#
 produce the matching XP helper and NVDA add-on. Wait for a tested release if
 you are not comfortable building a development copy.
 
+**Choosing a route:** This bridge is for a SAPI 5 voice that already works in
+XP. Native Mac voice add-ons and native Eloquence run on the current Windows PC
+without XP. If you want to read a document *inside XP*, use XP's NVDA and its
+local SAPI synthesizer; the host bridge is not required for that task.
+
 ## Before you start
 
 You need:
