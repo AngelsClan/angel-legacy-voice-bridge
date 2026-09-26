@@ -6,7 +6,8 @@ speech back to NVDA, or lets XP play the sound.
 
 **This is a development build (`0.1.2-dev4`), not a public release.** An
 earlier NVDA freeze has not been conclusively explained. Keep another NVDA
-voice available while testing. [Read the test results](TEST-REPORT.md).
+voice available while testing. [Read the test results](TEST-REPORT.md) and
+[what to do if a voice fails](docs/ADVANCED-GUIDE.md#what-happens-when-the-voice-fails).
 
 **Looking for a download?** There is no public installer release yet. This
 repository contains the source; the [build instructions](docs/ADVANCED-GUIDE.md#building-from-source)
@@ -125,6 +126,8 @@ Windows account to share this local status.
 
 - [Detailed setup, updates, settings, and troubleshooting](docs/ADVANCED-GUIDE.md)
 - [What has been tested and what remains uncertain](TEST-REPORT.md)
+- [Changes between development builds](CHANGELOG.md)
+- [Removing the add-on](docs/ADVANCED-GUIDE.md#removing-it)
 - [Why a bridge can help](RATIONALE.md)
 - [Privacy, safety, and known limits](docs/ADVANCED-GUIDE.md#privacy-and-security)
 - [Report a problem](https://github.com/AngelsClan/angel-legacy-voice-bridge/issues)
