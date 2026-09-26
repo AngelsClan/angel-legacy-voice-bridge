@@ -9,10 +9,12 @@ earlier NVDA freeze has not been conclusively explained. Keep another NVDA
 voice available while testing. [Read the test results](TEST-REPORT.md) and
 [what to do if a voice fails](docs/ADVANCED-GUIDE.md#what-happens-when-the-voice-fails).
 
-**Looking for a download?** There is no public installer release yet. This
-repository contains the source; the [build instructions](docs/ADVANCED-GUIDE.md#building-from-source)
-produce the matching XP helper and NVDA add-on. Wait for a tested release if
-you are not comfortable building a development copy.
+**Looking for a download?** The [0.1.1 beta release](https://github.com/AngelsClan/angel-legacy-voice-bridge/releases/tag/v0.1.1)
+is public, but it is older than the `0.1.2-dev4` source described on this
+page. There is no installer release for this development build. The
+[build instructions](docs/ADVANCED-GUIDE.md#building-from-source) produce its
+matching XP helper and NVDA add-on. Do not mix a beta helper with a newer
+development add-on; wait for a matching release if you do not build from source.
 
 **Choosing a route:** This bridge is for a SAPI 5 voice that already works in
 XP. Native Mac voice add-ons and native Eloquence run on the current Windows PC
