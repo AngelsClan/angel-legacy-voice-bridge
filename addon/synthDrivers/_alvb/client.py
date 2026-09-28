@@ -12,6 +12,8 @@ DEFAULT_PIPE = r"\\.\pipe\AngelLegacySpeech-XP"
 ACK_TIMEOUT = 4
 VOICE_REFRESH_INTERVAL = 5
 VOICE_REFRESH_TIMEOUT = 4
+PIPE_BUSY = 231
+PIPE_BUSY_REPAIR_DELAY = 3
 
 
 def text_shape(items):
@@ -92,6 +94,8 @@ class BridgeClient:
         self.closed_event = threading.Event()
         self._wait_for = wait_for
         self._last_serial_repair = 0
+        self._pipe_busy_since = None
+        self._last_connect_warning = 0
         self._queue = deque()
         self._commands = deque()
         self._active = None
@@ -741,14 +745,29 @@ class BridgeClient:
             repair_needed = False
             try:
                 transport = self.transport_factory(self.pipe_name)
+                self._pipe_busy_since = None
                 self.status = "Connecting to XP helper"
                 self._session_loop(transport)
             except Exception as error:
                 # Error messages contain state/errors only, never speech payloads.
                 reason = str(error) if isinstance(error, (OSError, ValueError)) else "Unexpected bridge failure"
+                was_connected = self.connected
                 self._disconnect(reason)
+                now = time.monotonic()
+                busy = isinstance(error, OSError) and getattr(error, "winerror", None) == PIPE_BUSY
+                if busy:
+                    if self._pipe_busy_since is None:
+                        self._pipe_busy_since = now
+                else:
+                    self._pipe_busy_since = None
+                # Before the first handshake _disconnect has no connected
+                # session to report. Keep the actual open failure observable.
+                if not was_connected and now - self._last_connect_warning >= 30:
+                    self._last_connect_warning = now
+                    self.log.warning("Bridge connection failed: %s", reason)
                 repair_needed = (isinstance(error, TimeoutError)
-                                 and reason == "No reply from XP helper")
+                                 and reason == "No reply from XP helper") or (
+                                     busy and now - self._pipe_busy_since >= PIPE_BUSY_REPAIR_DELAY)
             finally:
                 if transport is not None:
                     try:
@@ -761,6 +780,7 @@ class BridgeClient:
                     self._last_serial_repair = now
                     from .serial_recovery import repair
                     if repair(self.pipe_name):
-                        self.log.warning("Reopened matching VirtualBox serial pipe after XP stopped replying")
+                        self.log.warning("Reopened matching VirtualBox serial pipe after bridge connection failure")
+                        self._pipe_busy_since = None
             self._stop.wait(1)
         self._disconnect("Stopped")

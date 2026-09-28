@@ -36,8 +36,18 @@ shortcuts, change autologon, start XP, or change VM hardware automatically.
 On the tested VirtualBox build, a short open-and-close of the host pipe can
 consume its single connection without delivering a HELLO to XP. Do not use a
 bare pipe-open probe before the actual client. If the helper receives no HELLO
-and later attempts report PIPE_BUSY, close test clients and restore the VM's
-serial backend with a graceful XP restart; keep networking disabled.
+and later attempts report PIPE_BUSY, close test clients. If the bridge's
+bounded serial recovery also fails, restore the VM's serial backend with a
+graceful XP restart; keep networking disabled.
+
+After a saved-state resume, Windows can instead return WinError 231 (all pipe
+instances busy) before the bridge can send HELLO. The client records that open
+failure, retries briefly, and then reopens only the serial backend of the
+running VM whose configured pipe exactly matches its setting. This does not
+restart XP or NVDA. A failed synth selection should include the underlying
+connection reason in the bridge diagnostic log; the generic NVDA synthesizer
+load error alone does not identify it. Do not repeatedly open the pipe with a
+separate probe while NVDA is connecting.
 
 ## Manual startup in XP
 

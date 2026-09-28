@@ -57,11 +57,14 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             if matching_serial(service.settings()["pipe"]):
                 self.client.wait_connected(7)
         if not self.client.connected or not self.client.voices:
+            reason = self.client.status
             settings = service.settings()
             if not previous_active or (not settings["enabled"] and not settings["mirror"]):
                 service.stop()
                 settings["active"] = previous_active
-            raise RuntimeError("Connect and test the XP helper in Legacy Voice Bridge settings first.")
+            raise RuntimeError(
+                "XP bridge did not connect: %s. Check Legacy Voice Bridge settings."
+                % reason)
         self._voice = next(iter(self.client.voice_tokens.values()))
         self._rate = 50
         self._volume = 100

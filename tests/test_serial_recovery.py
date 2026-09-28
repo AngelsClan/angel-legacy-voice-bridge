@@ -50,6 +50,51 @@ class Runner:
 
 
 class SerialRecoveryTests(unittest.TestCase):
+    def test_worker_repairs_persistently_busy_pipe_before_first_handshake(self):
+        repaired = threading.Event()
+        attempts = []
+
+        class Transport:
+            def __init__(self):
+                self.reply = b""
+
+            def write(self, data):
+                for line in data.decode().splitlines():
+                    fields = line.split("\t")
+                    if fields[0] == "HELLO":
+                        session = fields[2]
+                        self.reply += ("READY\t2\t%s\nVOICE\t0\t%s\t%s\nENDVOICES\n" % (
+                            session, "Test voice".encode("utf-16-le").hex(),
+                            "test-token".encode("utf-16-le").hex())).encode()
+                    elif fields[0] == "PING":
+                        self.reply += ("PONG\t%s\n" % fields[1]).encode()
+
+            def read(self):
+                reply, self.reply = self.reply, b""
+                return reply
+
+            def close(self):
+                pass
+
+        def factory(name):
+            attempts.append(name)
+            if not repaired.is_set():
+                error = OSError("All pipe instances are busy")
+                error.winerror = 231
+                raise error
+            return Transport()
+
+        client = BridgeClient(PIPE, transport_factory=factory)
+        with (patch.object(serial_recovery, "repair", side_effect=lambda name: repaired.set() or True) as fix,
+              patch("_alvb.client.PIPE_BUSY_REPAIR_DELAY", .1)):
+            client.start()
+            try:
+                self.assertTrue(client.wait_connected(5), client.status)
+                self.assertGreaterEqual(len(attempts), 3)
+                fix.assert_called_once_with(PIPE)
+            finally:
+                client.close()
+
     def test_worker_repairs_silent_pipe_and_opens_new_session(self):
         repaired = threading.Event()
         opened = []
