@@ -644,6 +644,29 @@ error. A later retry succeeded and the full integration passed. Tests and tools
 must release the single pipe before another client connects; do not run them
 while NVDA owns it. The runtime client retries transient pipe availability.
 
+## Saved-state recovery check, 2026-09-28
+
+The host add-on initially failed to load after a saved XP VM resumed. The
+underlying Windows open error was 231, meaning the VirtualBox serial pipe was
+busy before the helper received a HELLO. Reopening the matching serial backend
+restored voice enumeration without restarting XP. A first automatic-recovery
+revision still failed when a host client stayed connected during Save State:
+its serial reset was attempted while the VM was saving, and the failed attempt
+incorrectly started a 60-second cooldown. The client now retries failed
+repairs after a short interval and keeps the long cooldown only for a
+successful repair of a silent connection.
+
+With the user's story closed and XP Say All stopped, six save/resume cycles
+with a disconnected host client all enumerated 37 voices. A controlled busy
+pipe returned error 231; the updated client reopened the serial backend and
+enumerated all 37 voices. Three more save/resume cycles left one host client
+connected throughout, with saved intervals of 5, 20 and 45 seconds. Each
+reconnected and enumerated 37 voices after resume. A subsequent XP reboot also
+started the helper and passed silent voice enumeration. XP network adapters
+remained disabled. These checks did not speak user text or prove uninterrupted
+long-duration audio; the updated add-on still needs the user's NVDA selection
+check after installation. No XP helper binary changed in this correction.
+
 ## Remaining user and platform acceptance
 
 1. Install the new `.nvda-addon`, replace the XP helper, and restart NVDA when

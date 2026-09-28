@@ -84,14 +84,25 @@ class SerialRecoveryTests(unittest.TestCase):
                 raise error
             return Transport()
 
+        repair_attempts = []
+
+        def repair_after_save(name):
+            repair_attempts.append(name)
+            # The first reset occurs while VirtualBox is saving the VM.
+            if len(repair_attempts) == 1:
+                return False
+            repaired.set()
+            return True
+
         client = BridgeClient(PIPE, transport_factory=factory)
-        with (patch.object(serial_recovery, "repair", side_effect=lambda name: repaired.set() or True) as fix,
+        with (patch.object(serial_recovery, "repair", side_effect=repair_after_save) as fix,
               patch("_alvb.client.PIPE_BUSY_REPAIR_DELAY", .1)):
             client.start()
             try:
-                self.assertTrue(client.wait_connected(5), client.status)
+                self.assertTrue(client.wait_connected(7), client.status)
                 self.assertGreaterEqual(len(attempts), 3)
-                fix.assert_called_once_with(PIPE)
+                self.assertEqual(fix.call_count, 2)
+                self.assertEqual(repair_attempts, [PIPE, PIPE])
             finally:
                 client.close()
 

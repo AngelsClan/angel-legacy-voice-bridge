@@ -94,6 +94,7 @@ class BridgeClient:
         self.closed_event = threading.Event()
         self._wait_for = wait_for
         self._last_serial_repair = 0
+        self._last_serial_repair_attempt = 0
         self._pipe_busy_since = None
         self._last_connect_warning = 0
         self._queue = deque()
@@ -776,10 +777,15 @@ class BridgeClient:
                         self.log.warning("Bridge transport close failed")
             if repair_needed and not self._stop.is_set():
                 now = time.monotonic()
-                if now - self._last_serial_repair >= 60:
-                    self._last_serial_repair = now
+                # A save in progress can reject the reset. Retry a busy pipe
+                # after a short interval; the VM may resume seconds later.
+                # Keep the long cooldown for an already repaired silent link.
+                if (now - self._last_serial_repair_attempt >= 2
+                        and (busy or now - self._last_serial_repair >= 60)):
+                    self._last_serial_repair_attempt = now
                     from .serial_recovery import repair
                     if repair(self.pipe_name):
+                        self._last_serial_repair = now
                         self.log.warning("Reopened matching VirtualBox serial pipe after bridge connection failure")
                         self._pipe_busy_since = None
             self._stop.wait(1)
