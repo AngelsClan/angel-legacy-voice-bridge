@@ -1,6 +1,21 @@
 # Release notes
 
-## Current: 0.1.2-dev4 — development build, release on hold
+## Current: 0.1.2-dev5 — development build, release on hold
+
+Two AT&T Mike requests on October 1 ended with no routed audio even though
+the XP helper reported completion. Both were the same 1,566-character request,
+including one uninterrupted 1,500-character span. The host add-on now creates
+separate SAPI utterances within unusually long uninterrupted spans, preserving
+every character and bookmark. Ordinary paragraphs keep their previous
+batching. This avoids presenting that exact pathological span to the engine
+as a single utterance; it still needs normal-use listening confirmation.
+
+Only the host add-on changed. The existing dev4 XP helper is compatible and
+does not need replacing for this update. Select a dependable local voice
+while installing `AngelLegacyVoiceBridge-0.1.2-dev5.nvda-addon`, then test AT&T
+Mike with the affected text. The public beta release remains on hold.
+
+## Previous: 0.1.2-dev4 — development build, release on hold
 
 This same-version development revision updates both the XP helper and host
 add-on. The XP helper now encodes literal exclamation marks in generated SAPI

@@ -1,10 +1,12 @@
 """Bounded serial frames; version 2 assembles one utterance before speaking."""
 import base64
 import binascii
+import re
 from dataclasses import dataclass, replace
 
 MAX_LINE = 8191
 CHUNK_CHARACTERS = 120
+MAX_SAPI_UNBROKEN = 256
 MAX_AUDIO_BYTES = 2048
 XML_REPLACEMENTS = {value: " " for value in range(1, 32) if value not in (9, 10, 13)}
 XML_REPLACEMENTS.update({0: None, 0xFFFE: " ", 0xFFFF: " "})
@@ -34,8 +36,9 @@ def bounded_utterances(items, max_items=200, max_characters=8000):
     """Preserve every item while dividing a large NVDA request for XP.
 
     The transport accepts at most 256 items and 16,000 characters per
-    utterance. Keep well inside both limits so a large say-all item cannot
-    turn into an admission error and an unnecessary synth fallback.
+    utterance. Some XP voices also finish silently on a much shorter,
+    uninterrupted token. Put a SAPI completion boundary inside only those
+    pathological tokens, without inserting or removing any source text.
     """
     batch = []
     characters = 0
@@ -48,13 +51,19 @@ def bounded_utterances(items, max_items=200, max_characters=8000):
                     batch, characters = [], 0
                 allowance = max_characters - characters
                 count = min(len(remaining), allowance)
-                if count < len(remaining):
+                long_run = re.search(r"\S{%d}" % (MAX_SAPI_UNBROKEN + 1), remaining[:count])
+                if long_run:
+                    count = long_run.start() + MAX_SAPI_UNBROKEN
+                elif count < len(remaining):
                     boundary = remaining.rfind(" ", 0, count)
                     if boundary >= count // 2:
                         count = boundary + 1
                 batch.append(replace(item, text=remaining[:count]))
                 characters += count
                 remaining = remaining[count:]
+                if long_run and remaining:
+                    yield tuple(batch)
+                    batch, characters = [], 0
         else:
             if len(batch) >= max_items:
                 yield tuple(batch)

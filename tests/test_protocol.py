@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import re
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "addon/synthDrivers"))
@@ -22,6 +23,28 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(all(len(batch) <= 256 for batch in batches))
         self.assertTrue(all(sum(len(item.text) for item in batch if isinstance(item, Speech)) <= 16000
                             for batch in batches))
+
+    def test_long_unbroken_token_gets_sapi_boundaries_without_losing_text(self):
+        # The two live failures had a 1,500-character uninterrupted span and
+        # an otherwise normal-sized (1,566-character) utterance.
+        text = "A" * 1249 + "!" * 251 + " " * 16 + "!" * 50
+        self.assertEqual(len(text), 1566)
+        source = [Bookmark(1), Speech(text, voice=1), Bookmark(2)]
+        batches = list(bounded_utterances(source))
+        self.assertGreater(len(batches), 1)
+        self.assertEqual("".join(item.text for batch in batches for item in batch
+                                 if isinstance(item, Speech)), text)
+        self.assertEqual([item.index for batch in batches for item in batch
+                          if isinstance(item, Bookmark)], [1, 2])
+        for batch in batches:
+            spoken = "".join(item.text for item in batch if isinstance(item, Speech))
+            self.assertFalse(re.search(r"\S{257}", spoken))
+
+    def test_normal_paragraph_stays_one_sapi_utterance(self):
+        text = "A normal sentence with ordinary words. " * 50
+        batches = list(bounded_utterances([Speech(text, voice=1)]))
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0][0].text, text)
 
     def test_packets_form_one_utterance_without_losing_text(self):
         text = "Some words, including an emoji \U0001f600. " * 30

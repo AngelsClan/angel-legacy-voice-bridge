@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2-dev5 — bound uninterrupted SAPI input, release still on hold
+
+- Divide only unusually long uninterrupted text spans into smaller SAPI
+  utterances before transport. Preserve the text and NVDA bookmarks exactly.
+- Address two observed AT&T Mike zero-audio completions on the NVDA route for
+  the same 1,566-character input with a 1,500-character uninterrupted span.
+  The XP helper is unchanged; live confirmation with the affected voice is
+  still needed.
+
 ## 0.1.2-dev4 — XP status signal and speech admission follow-up, release still on hold
 
 - After a saved-state resume, a running VirtualBox VM can leave its host serial

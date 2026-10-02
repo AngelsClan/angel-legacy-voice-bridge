@@ -1,5 +1,25 @@
 # Beta qualification
 
+## 0.1.2-dev5 long-span failure investigation — 2026-10-01
+
+Host diagnostics recorded two AT&T Mike fallback events at 21:01:52 and
+21:02:11 local time. They were the same 1,566-character request: 1,249
+letters, 301 ASCII punctuation marks, 16 spaces and a 1,500-character
+uninterrupted span. The XP helper returned completion, but the NVDA route
+received zero audio bytes. This points to input-dependent silence in the
+voice or SAPI path rather than a lost serial connection; the exact internal
+engine cause has not been established.
+
+The dev5 host add-on keeps the original text and bookmark order while
+limiting uninterrupted spans to 256 characters per SAPI utterance. Regression
+tests cover the observed shape and confirm that ordinary paragraphs remain
+one utterance. The full isolated Python suite passed 190 tests, and the dev5
+add-on and source archives passed package and SHA-256 checks. The XP helper
+binary did not change. These source tests do
+not prove audible AT&T Mike output on XP; the owner should test the installed
+add-on with the affected text. No NVDA or XP runtime was restarted for this
+investigation.
+
 ## Read this first
 
 **Status: development build, public release on hold.** The newest results are

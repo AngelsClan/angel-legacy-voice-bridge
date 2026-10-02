@@ -4,17 +4,23 @@ Use an older Windows speech voice with NVDA on your current PC. The voice stays
 inside your Windows XP virtual machine. The bridge sends it text and brings
 speech back to NVDA, or lets XP play the sound.
 
-**This is a development build (`0.1.2-dev4`), not a public release.** An
+**This is a development build (`0.1.2-dev5`), not a public release.** An
 earlier NVDA freeze has not been conclusively explained. Keep another NVDA
 voice available while testing. [Read the test results](TEST-REPORT.md) and
 [what to do if a voice fails](docs/ADVANCED-GUIDE.md#what-happens-when-the-voice-fails).
 
 **Looking for a download?** The [0.1.1 beta release](https://github.com/AngelsClan/angel-legacy-voice-bridge/releases/tag/v0.1.1)
-is public, but it is older than the `0.1.2-dev4` source described on this
+is public, but it is older than the `0.1.2-dev5` source described on this
 page. There is no installer release for this development build. The
 [build instructions](docs/ADVANCED-GUIDE.md#building-from-source) produce its
 matching XP helper and NVDA add-on. Do not mix a beta helper with a newer
 development add-on; wait for a matching release if you do not build from source.
+
+Dev5 changes only the host add-on. It divides unusually long uninterrupted
+text spans into separate SAPI utterances before sending them to XP. This is a
+targeted response to two observed AT&T Mike silent completions with the same
+1,500-character span. Ordinary paragraphs retain their previous batching.
+The existing dev4 XP helper binary is unchanged and can be used with dev5.
 
 **Choosing a route:** This bridge is for a SAPI 5 voice that already works in
 XP. Native Mac voice add-ons and native Eloquence run on the current Windows PC
