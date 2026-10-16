@@ -27,6 +27,12 @@ XP. Native Mac voice add-ons and native Eloquence run on the current Windows PC
 without XP. If you want to read a document *inside XP*, use XP's NVDA and its
 local SAPI synthesizer; the host bridge is not required for that task.
 
+The October 16 maintenance update retains valid serial handles through helper
+timeouts and canceled I/O instead of provoking a stuck VirtualBox reopen. It
+also removes interactive synth-selection waiting and blocks unsafe live UART
+resets. Tests include real XP pause/resume recovery; see TEST-REPORT.md.
+Maintenance launchers must allow NVDA settings windows to display normally.
+
 ## Before you start
 
 You need:
@@ -42,12 +48,23 @@ The project does not supply XP, voices, or voice licenses. XP does not need an
 internet connection; the two programs talk through a local virtual serial
 connection.
 
-If VirtualBox's host serial pipe stops passing data after resuming a saved VM,
-the add-on can reopen that pipe automatically for a running VM whose configured
-serial pipe exactly matches the bridge setting. It then negotiates a new
-session with the XP helper; it does not reboot XP. This optional recovery uses
-VBoxManage when VirtualBox is installed on the same PC. Other VM software
-continues to use the ordinary reconnect loop.
+Temporary helper timeouts and canceled writes now keep a valid pipe handle
+open and negotiate a fresh session. Pending speech is discarded and local
+fallback remains available. Broken-pipe errors still close the handle normally.
+This avoids the close/reopen sequence that left VirtualBox 7.2.18 returning
+WinError 231 after a pause. It does not fix VirtualBox's own implementation.
+
+Automatic live UART/backend replacement is disabled: previous tests reproduced
+a VirtualBox shutdown crash after that operation. A pipe already stuck busy
+with no client handle may require an operator-controlled headless save/resume
+to recreate the VM process. A guest-only Windows reboot does not recreate it.
+The add-on never automatically saves, pauses, reboots or stops a VM.
+
+Ordinary new pipe opens wait for known Guest Additions startup levels 1 or 2
+to reach level 3. Without readiness metadata there is only the existing bounded
+cold-start grace period. Retained-handle retries perform no VBoxManage query.
+Interactive synthesizer selection does not wait for the VM; connect in bridge
+settings first. Only pre-GUI NVDA startup retains a bounded two-second handshake.
 
 You will change one VirtualBox setting while XP is shut down, then start one
 program inside XP and install one add-on on your current PC. Nothing sets up
@@ -131,6 +148,28 @@ In this development build, the XP helper and XP NVDA must run under the same
 Windows account to share this local status.
 
 ## More information
+
+## VirtualBox serial recovery and shutdown diagnostics
+
+The October 9 development update blocks automatic live UART/backend resets.
+A diskless test reproduced VirtualBox 7.2.18's shutdown access violation at
+VBoxVMM.dll +0xf1312 after the old disconnect/reconnect sequence. Direct
+replacement also crashed with an old connection held open, so it is not shipped
+as a fix. Ordinary pipe reconnects and the XP startup readiness checks remain.
+A pipe that remains stuck after saved-state resume may need a normal XP
+shutdown and cold boot. This avoids the bridge's reproduced trigger; it does
+not repair VirtualBox itself. Do not change UART backends while a VM is running.
+
+Default lifecycle diagnostics go to NVDA's log (normally `%TEMP%/nvda.log`).
+Set NVDA's logging level to Debug under General settings to increase detail
+without rebuilding. Look for `Unsafe VirtualBox serial reset blocked` with
+its UART. The existing bridge settings connection status remains the runtime check.
+No spoken content or pipe address is included in these new messages.
+
+From the project directory, run `python -m unittest discover -s tests -q`.
+The serial-reset rejection regression exercises the warning diagnostic and
+verifies no mutating VirtualBox command is issued. Updating a loaded host add-on requires a coordinated
+NVDA restart before the new recovery function becomes active.
 
 - [Detailed setup, updates, settings, and troubleshooting](docs/ADVANCED-GUIDE.md)
 - [What has been tested and what remains uncertain](TEST-REPORT.md)

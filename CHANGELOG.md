@@ -228,3 +228,18 @@ transport, NVDA synth and optional mirroring, configurable voice/rate/volume,
 normal synth pitch, connection tests, fallback and emergency local-speech
 shortcut. Includes source, build script, tests, protocol documentation, README
 and bundled NVDA help. See TEST-REPORT for qualification limits.
+
+
+## 0.1.2-dev5 maintenance: October 16, 2026
+
+- Retain valid pipe handles through helper timeouts and canceled I/O995, then
+  establish a fresh session without replaying stale speech. Broken pipes still
+  close/reopen normally; explicit stop closes the retained handle.
+- Remove interactive synthesizer-selection waits and external VM queries.
+- Keep automatic live UART reset disabled after the reproduced VirtualBox
+  shutdown crash; retain readiness diagnostics without mutating VM hardware.
+- Move disconnect snapshot logging outside the speech-state lock.
+- Add recovery ownership, stale-session, lock responsiveness and UI contract
+  tests. Document real native pipe and XP pause/resume qualification separately.
+- Correct maintenance instructions: normal NVDA window display is required;
+  forced-hidden startup can prevent settings from becoming visible.

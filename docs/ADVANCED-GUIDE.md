@@ -491,6 +491,21 @@ promise that the next paragraph will not fail.
 
 ## Troubleshooting
 
+**XP stays at its boot logo.** New connections wait while Guest Additions
+reports startup levels 1 or 2; level 3 means the user session is ready. Without
+readiness metadata the ordinary bounded cold-start grace remains. Never hot
+replace a UART/backend: a VirtualBox shutdown crash was reproduced after that
+operation. Startup delay alone does not prove a serial fault.
+
+**Pause or helper timeout.** A valid transport is retained for a fresh session
+on heartbeat timeout or canceled I/O (995). Old speech is discarded, fallback
+stays available, and broken pipes still reopen normally. If an already-broken
+VirtualBox endpoint reports busy without any client holding it, restarting XP
+inside the VM may not help. An operator can coordinate a headless save/resume
+of the VM process. This is not an automatic add-on action. Interactive synth
+selection returns without waiting when the bridge is unavailable; use the
+connection status in bridge settings first.
+
 **The voice list is empty, or it will not connect.**
 Check that the helper console is still open in XP, that COM1 exists in XP's
 Device Manager, that the pipe name in NVDA matches the one in the VM settings

@@ -6,6 +6,7 @@ import synthDriverHandler
 import globalVars
 import ui
 import queueHandler
+import wx
 from logHandler import log
 from synthDriverHandler import VoiceInfo, synthIndexReached, synthDoneSpeaking
 from ._alvb import service
@@ -40,22 +41,15 @@ class SynthDriver(synthDriverHandler.SynthDriver):
         previous_active = service.settings()["active"]
         service.settings()["active"] = True
         # NVDA initializes its saved synth before global plugins. Allow a short
-        # handshake here only; all normal speech and settings I/O is asynchronous.
+        # handshake only before the GUI exists. Interactive selection must never
+        # wait for a VM or launch VBoxManage on NVDA's main thread.
         try:
-            self.client = service.ensure_client(wait=2)
+            self.client = service.ensure_client(wait=2 if wx.GetApp() is None else 0)
         except Exception:
             service.settings()["active"] = previous_active
             if not previous_active:
                 service.stop()
             raise
-        if not self.client.connected:
-            # A restored VM can leave VirtualBox's serial server pipe attached
-            # but unable to pass bytes. The worker repairs the exact matching
-            # pipe after its first no-reply timeout, then opens a new session.
-            # Allow that one bounded repair during an explicit synth selection.
-            from ._alvb.serial_recovery import matching_serial
-            if matching_serial(service.settings()["pipe"]):
-                self.client.wait_connected(7)
         if not self.client.connected or not self.client.voices:
             reason = self.client.status
             settings = service.settings()

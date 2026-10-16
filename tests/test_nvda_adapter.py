@@ -129,7 +129,7 @@ class AdapterTests(unittest.TestCase):
                               synthIndexReached=Mock(), synthDoneSpeaking=Mock(), synthChanged=Mock())
         self.gui = module("gui", guiHelper=Mock(), messageBox=Mock())
         self.variables = module("globalVars", appArgs=types.SimpleNamespace(secure=False), settingsRing=Mock())
-        self.wx = module("wx", CallAfter=lambda function, *args: function(*args))
+        self.wx = module("wx", GetApp=lambda: None, CallAfter=lambda function, *args: function(*args))
         sequence = module("sequence", SUPPORTED_COMMANDS=set(), translate=Mock(return_value=[]))
         from _alvb import protocol
         from _alvb import formats
@@ -242,6 +242,14 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(self.settings["autoReturn"])
         self.service.disable.assert_called_once()
         self.service.ensure_client.assert_not_called()
+
+    def test_interactive_selection_never_waits_for_vm(self):
+        self.wx.GetApp = lambda: object()
+        self.client.connected = False
+        with self.assertRaises(RuntimeError):
+            self.synth.SynthDriver()
+        self.service.ensure_client.assert_called_once_with(wait=0)
+        self.client.wait_connected.assert_not_called()
 
     def test_failed_selection_restores_disabled_master(self):
         self.settings["active"] = False

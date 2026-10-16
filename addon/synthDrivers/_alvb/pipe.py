@@ -54,6 +54,17 @@ class Pipe:
         if self.handle == INVALID_HANDLE:
             raise ctypes.WinError(ctypes.get_last_error())
 
+    def can_reuse_after(self, error):
+        """A helper stall/canceled bounded write does not break the pipe handle.
+
+        Closing a valid VirtualBox UART pipe after a pause can leave its server
+        stuck in ERROR_NO_DATA. Re-handshake on the same handle instead. Broken
+        pipes, access errors, short writes and other failures still close it.
+        """
+        return self.handle != INVALID_HANDLE and (
+            isinstance(error, TimeoutError)
+            or isinstance(error, OSError) and getattr(error, "winerror", None) == ERROR_OPERATION_ABORTED)
+
     def close(self):
         if self.handle != INVALID_HANDLE:
             close_handle(self.handle)

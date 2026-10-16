@@ -217,3 +217,16 @@ selected format, and reproducible steps. Do not upload proprietary engine files
 or personal speech. The helper console and NVDA log contain lifecycle/error
 messages from this project; other add-ons or NVDA debug settings may log more.
 No account, telemetry, online voice service, or automatic updater is included.
+
+
+## Restarting host NVDA during authorized maintenance
+
+Coordinate the short speech interruption first. Use the installed NVDA's
+supported graceful quit/start operations; never force-terminate its process.
+Allow normal window display: do not supply STARTF_USESHOWWINDOW/SW_HIDE or
+Start-Process -WindowStyle Hidden for NVDA. The application is an interactive
+accessibility tool even when its main window normally stays out of the way.
+After restarting, verify both speech and the synthesizer dialog (NVDA+Control+S),
+then confirm the bridge connection. A successful process start alone is not a
+settings-dialog or audio acceptance test. Preserve personal configuration and
+keep the local fallback available.

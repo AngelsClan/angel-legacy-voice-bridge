@@ -33,10 +33,15 @@ def text_shape(items):
 
 
 class BridgeClient:
-    def __init__(self, pipe_name=DEFAULT_PIPE, callback=None, transport_factory=None, wait_for=None, quality=0, logger=None):
+    def __init__(self, pipe_name=DEFAULT_PIPE, callback=None, transport_factory=None, wait_for=None, quality=0, logger=None, startup_ready=None):
         # NVDA filters INFO from third-party loggers. Its adapter supplies the
         # NVDA logger; standalone probes retain normal Python logging.
         self.log = logger if logger is not None else logging.getLogger(__name__)
+        if startup_ready is None and transport_factory is None:
+            from .serial_recovery import connection_ready
+            startup_ready = connection_ready
+        self._startup_ready = startup_ready
+        self._last_startup_notice = 0
         if transport_factory is None:
             from .pipe import Pipe
             transport_factory = Pipe
@@ -270,19 +275,18 @@ class BridgeClient:
             self.audio.pause(bool(paused))
 
     def _disconnect(self, reason):
+        snapshot = None
+        shape = None
         with self._lock:
             was_connected = self.connected
             if was_connected and not self._stop.is_set():
                 slot, characters, quality, rate, volume = self._active_details if self._active else (-1, 0, 0, 0, 0)
                 elapsed = time.monotonic() - self._active[2] if self._active else 0
-                self.log.warning(
-                    "Failure snapshot: generation=%d request=%d queued=%d pending_indexes=%d "
-                    "active_seconds=%.2f voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
-                    self.generation, self._active[1] if self._active else 0,
-                    len(self._queue), len(self._pending_indexes), elapsed,
-                    slot, characters, quality, rate, volume)
+                snapshot = (self.generation, self._active[1] if self._active else 0,
+                            len(self._queue), len(self._pending_indexes), elapsed,
+                            slot, characters, quality, rate, volume)
                 if self._active and self._active_shape:
-                    self.log.warning("Failure text shape: request=%d %s", self._active[1], self._active_shape)
+                    shape = (self._active[1], self._active_shape)
             self.connected = False
             self._connected_event.clear()
             self.status = reason
@@ -307,6 +311,14 @@ class BridgeClient:
             self._audio_failure = None
         if self.audio is not None:
             self.audio.cancel()
+        # Collect under the lock, but logging must not block NVDA cancel/enqueue.
+        if snapshot is not None:
+            self.log.warning(
+                "Failure snapshot: generation=%d request=%d queued=%d pending_indexes=%d "
+                "active_seconds=%.2f voice_slot=%d characters=%d quality=%d rate=%d volume=%d",
+                *snapshot)
+        if shape is not None:
+            self.log.warning("Failure text shape: request=%d %s", *shape)
         if was_connected:
             logger = self.log
             if self._stop.is_set():
@@ -741,52 +753,75 @@ class BridgeClient:
             # Even a canceled replacement preserves the barrier for its successor.
             if time.monotonic() >= deadline:
                 break  # A stuck predecessor degrades to normal pipe-busy retry.
-        while not self._stop.is_set():
-            transport = None
-            repair_needed = False
-            try:
-                transport = self.transport_factory(self.pipe_name)
-                self._pipe_busy_since = None
-                self.status = "Connecting to XP helper"
-                self._session_loop(transport)
-            except Exception as error:
-                # Error messages contain state/errors only, never speech payloads.
-                reason = str(error) if isinstance(error, (OSError, ValueError)) else "Unexpected bridge failure"
-                was_connected = self.connected
-                self._disconnect(reason)
-                now = time.monotonic()
-                busy = isinstance(error, OSError) and getattr(error, "winerror", None) == PIPE_BUSY
-                if busy:
-                    if self._pipe_busy_since is None:
-                        self._pipe_busy_since = now
-                else:
+        transport = None
+        try:
+            while not self._stop.is_set():
+                repair_needed = False
+                try:
+                    if transport is None and self._startup_ready is not None and not self._startup_ready(self.pipe_name):
+                        self.status = "Waiting for XP startup"
+                        now = time.monotonic()
+                        if now - self._last_startup_notice >= 30:
+                            self._last_startup_notice = now
+                            self.log.info("Bridge connection deferred: waiting for the XP guest session")
+                        self._stop.wait(1)
+                        continue
+                    if transport is None:
+                        transport = self.transport_factory(self.pipe_name)
                     self._pipe_busy_since = None
-                # Before the first handshake _disconnect has no connected
-                # session to report. Keep the actual open failure observable.
-                if not was_connected and now - self._last_connect_warning >= 30:
-                    self._last_connect_warning = now
-                    self.log.warning("Bridge connection failed: %s", reason)
-                repair_needed = (isinstance(error, TimeoutError)
-                                 and reason == "No reply from XP helper") or (
-                                     busy and now - self._pipe_busy_since >= PIPE_BUSY_REPAIR_DELAY)
-            finally:
-                if transport is not None:
-                    try:
-                        transport.close()
-                    except OSError:
-                        self.log.warning("Bridge transport close failed")
-            if repair_needed and not self._stop.is_set():
-                now = time.monotonic()
-                # A save in progress can reject the reset. Retry a busy pipe
-                # after a short interval; the VM may resume seconds later.
-                # Keep the long cooldown for an already repaired silent link.
-                if (now - self._last_serial_repair_attempt >= 2
-                        and (busy or now - self._last_serial_repair >= 60)):
-                    self._last_serial_repair_attempt = now
-                    from .serial_recovery import repair
-                    if repair(self.pipe_name):
-                        self._last_serial_repair = now
-                        self.log.warning("Reopened matching VirtualBox serial pipe after bridge connection failure")
+                    self.status = "Connecting to XP helper"
+                    self._session_loop(transport)
+                except Exception as error:
+                    # Error messages contain state/errors only, never speech payloads.
+                    reason = str(error) if isinstance(error, (OSError, ValueError)) else "Unexpected bridge failure"
+                    was_connected = self.connected
+                    self._disconnect(reason)
+                    now = time.monotonic()
+                    busy = isinstance(error, OSError) and getattr(error, "winerror", None) == PIPE_BUSY
+                    if busy:
+                        if self._pipe_busy_since is None:
+                            self._pipe_busy_since = now
+                    else:
                         self._pipe_busy_since = None
-            self._stop.wait(1)
+                    # Before the first handshake _disconnect has no connected
+                    # session to report. Keep the actual open failure observable.
+                    if not was_connected and now - self._last_connect_warning >= 30:
+                        self._last_connect_warning = now
+                        self.log.warning("Bridge connection failed: %s", reason)
+                    repair_needed = (isinstance(error, TimeoutError)
+                                     and reason == "No reply from XP helper") or (
+                                         busy and now - self._pipe_busy_since >= PIPE_BUSY_REPAIR_DELAY)
+                    reuse = transport is not None and getattr(
+                        transport, "can_reuse_after", lambda failure: False)(error)
+                    if reuse:
+                        repair_needed = False
+                        self.log.warning(
+                            "Bridge transport retained for fresh handshake: error_type=%s native_code=%s",
+                            type(error).__name__, getattr(error, "winerror", None))
+                    elif transport is not None:
+                        try:
+                            transport.close()
+                        except OSError:
+                            self.log.warning("Bridge transport close failed")
+                        transport = None
+                if repair_needed and not self._stop.is_set():
+                    now = time.monotonic()
+                    # The legacy repair hook is diagnostic-only: live UART
+                    # replacement is unsafe. Rate-limit its readiness queries;
+                    # retained transports do not enter this path.
+                    if (now - self._last_serial_repair_attempt >= 2
+                            and (busy or now - self._last_serial_repair >= 60)):
+                        self._last_serial_repair_attempt = now
+                        from .serial_recovery import repair
+                        if repair(self.pipe_name):
+                            self._last_serial_repair = now
+                            self.log.warning("Reopened matching VirtualBox serial pipe after bridge connection failure")
+                            self._pipe_busy_since = None
+                self._stop.wait(1)
+        finally:
+            if transport is not None:
+                try:
+                    transport.close()
+                except OSError:
+                    self.log.warning("Bridge transport close failed during shutdown")
         self._disconnect("Stopped")

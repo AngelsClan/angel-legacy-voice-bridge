@@ -1,5 +1,46 @@
 # Beta qualification
 
+## XP startup serial-recovery guard — 2026-10-07
+
+The installed host worker repeatedly detached and reattached the matching
+VirtualBox UART backend while XP was at its boot logo. Its previous guard
+checked only that the VM process was running. Two controlled cold boots with
+the serial backend disconnected until guest readiness reached the desktop;
+the second reached a ready guest session in 21.2 seconds. The exact configured
+pipe was then restored. This is strong evidence of startup interference, not
+proof that every historical boot stall had the same cause.
+
+Automatic repair now additionally requires Guest Additions run level 3.
+Regression tests cover absent readiness and levels 0, 1 and 2, and verify that
+repair becomes available at level 3. The focused suite passed 10 tests and the
+full suite passed 192 tests using a workspace-owned temporary directory.
+An earlier sandbox run encountered three temporary-file permission errors;
+the unrestricted workspace-temp run passed with zero errors. Deferred repair
+logs its state at Info level without logging speech or credentials.
+
+A separate VirtualBox 7.2.18 frontend access violation was captured during one
+guest shutdown following serial backend churn. The next clean shutdown
+completed normally. The startup guard has not been established as a fix for
+that frontend teardown crash; its log is retained in the local investigation
+artifacts. No hypervisor, host power setting or guest voice was changed.
+
+After the owner's approved NVDA restart, a normal cold boot with the serial
+pipe attached reached readiness in 17.6 seconds, and another normal start after
+creating a rollback snapshot reached it in 12.2 seconds. The first post-SP2
+boot with a candidate 16550A UART stalled; that UART model was reverted. A boot
+with the original 16750 model and the serial backend disconnected succeeded.
+These new conditions mean startup is not fully qualified by the repair guard
+alone. A further change now defers ordinary pipe opens at known Guest Additions
+startup levels 1 and 2, and uses a bounded 90-second cold-start grace when no
+readiness service is present. Four new tests cover gating, readiness transition,
+bounded legacy behavior and unrelated transports. Its focused suite passed 14
+tests and the full suite passed 196 tests. Both source/installed Python hashes
+matched after the separately owner-approved NVDA restart. A normal attached-pipe
+SP3 boot with a standalone real handshake worker reached readiness in 17.3
+seconds. The worker waited during startup, then received a 37-voice catalogue;
+one transient pipe error recovered. Its preceding shutdown completed normally.
+Earlier VirtualBox teardown crashes remain an unconfirmed intermittent finding.
+
 ## 0.1.2-dev5 long-span failure investigation — 2026-10-01
 
 Host diagnostics recorded two AT&T Mike fallback events at 21:01:52 and
@@ -711,7 +752,85 @@ No network transport, secure-login use, Windows service or host SAPI5 adapter.
 
 ## Reproduction
 
+### October 9 shutdown crash investigation and staged repair
+
+Diskless VirtualBox 7.2.18 fixtures reproduced the XP shutdown access violation
+at VBoxVMM.dll +0xf1312 after UART disconnect/reattach. Baseline shutdown passed.
+Direct replacement passed ten close/reset/reopen cycles and immediate shutdown,
+and a separate saved-resume case, but crashed with an old pipe connection held
+open. Oracle's current Console implementation detaches the driver even for
+direct replacement. That narrower mitigation was rejected.
+
+The staged repair blocks all automatic live UART reset commands; normal pipe
+reconnect and boot readiness checks remain. All 197 regression tests pass,
+including safe, once-only diagnostic output and absence of mutating commands.
+Follow-up: owner installation and host NVDA restart completed October9.
+Installed source hash verified. Actual XP headless boot connected the bridge;
+a32minute session ended in clean normal shutdown, TERMINATED/PoweredOff, and
+no new Windows VirtualBox crash event. Actual speech tests used guest local SAPI,
+not host bridge synthesis. This qualifies boot/connection/shutdown in this setup;
+it does not qualify all speech/UI workflows or originalXP saved-state resume.
+Detailed machine logs and crash evidence are retained privately by the maintainer.
+
+The experimental TCP alternative is excluded. The inspected Oracle driver uses
+an unspecified bind address and has a TODO for interface-specific binding.
+No experimental network transport, listener, firewall rule or new component was
+installed. Detailed evidence is retained privately by the maintainer. Default warning output is in NVDA's log; General logging level Debug
+raises verbosity without a rebuild. The bridge settings status is the runtime
+check. The safe-blocked-reset failure path was exercised by the tests.
+
 See OPERATIONS.md for commands, scope and safety. Unit tests never require a
 running VM. Live probes require an idle helper and a free pipe; they close their
 client afterward. The live voice probe needs an operator-controlled disposable
 registration; the mixer probe requires explicit permission to change XP volume.
+
+
+## October 16 pause/disconnect recovery
+
+Actual owner incident: canceled pipe I/O995, subsequent repeated231; VirtualBox
+logged ConnectNamedPipe VERR_NO_DATA with no host bridge handle. A headless
+save/resume recreated the VM process and the existing NVDA worker reconnected.
+No guest desktop restart, host NVDA restart or serial backend hot-detach.
+
+Host retention fix passed204 isolated tests, including canceled-write policy,
+helper-timeout same-transport recovery, broken-pipe reopen and UI no-wait tests.
+A real Windows named-pipe fixture suppressed helper replies past heartbeat
+expiry and then recovered: one native handle open, two fresh protocol sessions.
+This fixture used no live NVDA, VM, voice assets or physical audio. It is not
+proof of every VirtualBox pause or long-duration story-reading scenario.
+The XP helper binary was unchanged.
+
+A second real Windows pipe test forced an overlapped write cancellation995,
+then sent a fresh marker and received its reply on the same handle. Failure
+snapshot logging was moved outside the speech-state lock, with a blocking-log
+regression. Previous-session audio/format/index/catalog replies are rejected
+before a matching new READY; the regression confirms no old audio is fed.
+The review suggestion to close a retained handle after15seconds was rejected:
+serial_recovery.repair is deliberately disabled after a reproduced VirtualBox
+shutdown crash. Forced closure would reintroduce this incident during a long
+VM pause; retaining the handle permits an arbitrary pause while fallback stays
+available. Broken-pipe109/232 still closes normally; worker stop closes once.
+
+After explicit owner approval, staged/verified four host add-on files and
+restarted NVDA gracefully (no forced kill; profile/configuration unchanged).
+New worker connected successfully. Real XP pauses of7seconds and17seconds
+then passed: repeated actual995 errors retained the handle, fresh handshake
+completed after resume, no231, no VM-process recreation during either test.
+Host local fallback was verified before each pause. XP remains headless,
+running, offline; NVDA remains running. Active bridge voice selection and long story-reading acceptance remain
+user tests; the local fallback was
+preserved rather than forcing a voice switch. No XP helper or voice changes.
+
+
+### NVDA settings-window activation correction
+
+After the coordinated restart, the operator reported that the synthesizer
+selection dialog did not become visible. The maintenance launcher had supplied
+STARTF_USESHOWWINDOW/SW_HIDE. That forced-hidden startup was removed; the
+operator subsequently confirmed that the synthesizer dialog opened again.
+Normal NVDA window display is required during maintenance. --minimal may
+suppress startup messages; it is not a reason to force-hide settings windows.
+This was a launcher error, not evidence of a bridge protocol failure. Avoid
+restarting NVDA unnecessarily, and coordinate a brief speech interruption first.
+The complete interactive workflow and long-duration reading still require
+acceptance on each setup; the specific dialog-opening result was user-confirmed.
